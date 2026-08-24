@@ -32,12 +32,6 @@ MIN_SEGMENT_TIME_S = SECONDS_PER_SAMPLE  # 0.02 s
 # produces large apparent speed swings that are not real braking events.
 MIN_HROT_FOR_BRAKING = 2
 
-# Trips to skip
-SKIP_TRIPS = {
-    "602CD": ["Trip1"],
-    "604F0": ["Trip1"]
-}
-
 def load_metadata():
     """Load existing metadata file if it exists - READ ONLY"""
     meta_file = Path("trips_metadata.json")
