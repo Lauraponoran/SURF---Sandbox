@@ -1,0 +1,981 @@
+/* styles.css */
+
+:root {
+  --sc-cyan: #34CCCC;
+  --sc-gold: #FFCC33;
+  --sc-panel-bg: rgba(10, 16, 24, 0.55);
+  --sc-panel-border: rgba(52, 204, 204, 0.15);
+  --sc-text: #b8cad8;
+  --sc-text-bright: #dce8f0;
+  --sc-text-dim: rgba(184, 202, 216, 0.45);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Rajdhani', sans-serif;
+  background: #000;
+  color: var(--sc-text);
+}
+
+#map {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+}
+
+/* Hide scrollbars globally */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* Controls Panel */
+#controls {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  left: 10px;
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 15px;
+  border-radius: 6px;
+  min-width: 260px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  color: var(--sc-text);
+}
+
+#controls img {
+  width: 100%;
+  max-height: clamp(70px, 20vh, 140px);
+  height: auto;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  border: 1px solid var(--sc-panel-border);
+  opacity: 0.9;
+  transition: opacity 0.2s ease;
+  display: block;
+}
+
+@media (max-width: 768px) and (orientation: landscape) {
+  #controls img {
+    max-height: 70px;
+  }
+}
+
+h3 {
+  margin: 0 0 15px 0;
+  font-size: 17px;
+  border-bottom: 2px solid #ddd;
+  padding-bottom: 8px;
+}
+
+#controls h3 {
+  font-family: 'Rajdhani', sans-serif;
+  color: var(--sc-gold);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  border-bottom-color: var(--sc-panel-border);
+}
+
+.control-group {
+  margin-bottom: 15px;
+}
+
+label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sc-text);
+}
+
+.control-group > label:not(.checkbox-label):not(.radio-label) {
+  color: var(--sc-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+select {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: var(--sc-text);
+}
+.checkbox-label:hover {
+  color: var(--sc-text-bright);
+}
+
+.sub-controls {
+  margin-left: 24px;
+  padding-left: 12px;
+  border-left: 2px solid #ddd;
+  margin-top: 8px;
+}
+
+.sub-controls .control-group {
+  margin-bottom: 12px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  margin-right: 8px;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid rgba(52, 204, 204, 0.3);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+  vertical-align: middle;
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  background: var(--sc-cyan);
+  border-color: var(--sc-cyan);
+  box-shadow: 0 0 6px rgba(52, 204, 204, 0.25);
+}
+input[type="checkbox"]:checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  color: #0a1018;
+  font-weight: 700;
+}
+input[type="radio"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #0a1018;
+}
+
+input[type="range"] {
+  width: 100%;
+  cursor: pointer;
+}
+
+.slider-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.radio-group {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 13px;
+  font-weight: normal;
+  cursor: pointer;
+  color: var(--sc-text);
+}
+.radio-label:hover {
+  color: var(--sc-text-bright);
+}
+
+/* Search widget */
+.search-wrapper {
+  position: relative;
+}
+
+.search-input-row {
+  display: flex;
+  gap: 5px;
+}
+
+.search-input-row input[type="text"],
+#tripSearchInput {
+  flex: 1;
+  padding: 5px;
+  background: rgba(52, 204, 204, 0.04);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  color: var(--sc-text-bright);
+}
+#tripSearchInput::placeholder {
+  color: var(--sc-text-dim);
+}
+#tripSearchInput:focus {
+  border-color: var(--sc-cyan);
+  outline: none;
+  box-shadow: 0 0 6px rgba(52, 204, 204, 0.15);
+}
+
+#tripSearchButton,
+#tripClearButton {
+  padding: 5px 10px;
+  background: rgba(52, 204, 204, 0.08);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  color: var(--sc-cyan);
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+#tripSearchButton:hover,
+#tripClearButton:hover {
+  background: var(--sc-cyan);
+  color: #0a1018;
+}
+
+#tripClearButton {
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.date-range-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.date-range-sep {
+  color: var(--sc-text-dim);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  flex: none;
+}
+
+.search-date-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 6px;
+  background: rgba(52, 204, 204, 0.04);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px;
+  color: var(--sc-text-bright);
+  color-scheme: dark;
+}
+
+.search-date-input:focus {
+  border-color: var(--sc-cyan);
+  outline: none;
+  box-shadow: 0 0 6px rgba(52, 204, 204, 0.15);
+}
+
+.search-date-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.search-date-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+#searchSuggestions {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: rgba(8, 12, 20, 0.94);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  list-style: none;
+  margin: 2px 0 0 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 9999;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+#searchSuggestions li {
+  padding: 7px 10px;
+  cursor: pointer;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(52, 204, 204, 0.08);
+  color: var(--sc-text);
+}
+#searchSuggestions li:last-child {
+  border-bottom: none;
+}
+#searchSuggestions li:hover {
+  background: rgba(52, 204, 204, 0.12);
+  color: var(--sc-text-bright);
+}
+
+/* Reset Button */
+#resetButton {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 5px;
+  margin-top: 20px;
+  background: rgba(52, 204, 204, 0.06);
+  color: var(--sc-text);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  cursor: pointer;
+  display: none;
+  transition: all 0.2s;
+}
+#resetButton:hover {
+  border-color: var(--sc-cyan);
+  color: var(--sc-cyan);
+}
+#resetButton:active {
+  transform: scale(0.98);
+}
+
+/* ── averagedModeGroup ────────────────────────────────────────
+   Desktop: hidden by default, shown as column via JS.
+   Mobile:  same inline style — NO white bar override.
+   ────────────────────────────────────────────────────────── */
+#averagedModeGroup {
+  display: none;
+}
+
+/* All legends default to bottom right corner */
+.legend {
+  position: absolute;
+  bottom: 20px;
+  right: 10px;
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 12px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  display: none;
+  max-width: 220px;
+  color: var(--sc-text);
+}
+
+.legend h4 {
+  margin: 0 0 10px 0;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  color: var(--sc-cyan);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.legend > strong {
+  display: block;
+  margin: 0 0 10px 0;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  color: var(--sc-cyan);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.legend-note {
+  font-size: 11px;
+  margin: 0 0 8px 0;
+  color: var(--sc-text-dim);
+  font-style: italic;
+}
+
+.speed-legend-item {
+  display: flex;
+  align-items: center;
+  margin: 5px 0;
+  font-size: 12px;
+}
+
+.speed-legend-item span {
+  color: var(--sc-text);
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.sensor-legend-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.sensor-legend-item.active {
+  outline: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+}
+
+.speed-color-box {
+  width: 30px;
+  height: 4px;
+  margin-right: 8px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Averaged segments sub-legends: only composite shown by default */
+#avgSpeedLegendItems,
+#avgQualityLegendItems {
+  display: none;
+}
+
+/* Stats Panel */
+#stats {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 12px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  font-size: 13px;
+  color: var(--sc-text);
+}
+
+#stats h4 {
+  margin: 0 0 8px 0;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  color: var(--sc-cyan);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0;
+  min-width: 200px;
+  border-bottom-color: rgba(52, 204, 204, 0.06);
+}
+
+.stat-label {
+  color: var(--sc-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-size: 12px;
+}
+
+.stat-value {
+  font-family: 'Share Tech Mono', monospace;
+  font-weight: 700;
+  color: var(--sc-gold);
+}
+
+#selectedTripRow {
+  display: none;
+}
+
+/* Fullscreen Button */
+#fullscreenBtn {
+  position: absolute;
+  z-index: 1;
+  top: 10px;
+  right: 10px;
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--sc-cyan);
+  font-family: 'Rajdhani', sans-serif;
+  backdrop-filter: blur(14px);
+  transition: border-color 0.2s;
+}
+#fullscreenBtn:hover {
+  border-color: var(--sc-cyan);
+}
+#fullscreenBtn:active {
+  transform: scale(0.95);
+}
+
+/* Fullscreen container */
+#mapContainer {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+}
+
+#mapContainer:fullscreen,
+#mapContainer:-webkit-full-screen,
+#mapContainer:-moz-full-screen,
+#mapContainer:-ms-fullscreen {
+  width: 100vw;
+  height: 100vh;
+}
+
+#mapContainer:fullscreen #fullscreenBtn,
+#mapContainer:-webkit-full-screen #fullscreenBtn,
+#mapContainer:-moz-full-screen #fullscreenBtn,
+#mapContainer:-ms-fullscreen #fullscreenBtn {
+  top: 10px;
+  right: 10px;
+}
+
+/* Manual Toggle Button */
+#manualToggleBtn {
+  position: absolute;
+  z-index: 2;
+  top: 60px;
+  right: 10px;
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sc-cyan);
+  font-family: 'Rajdhani', sans-serif;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  backdrop-filter: blur(14px);
+  transition: border-color 0.2s;
+}
+#manualToggleBtn:hover {
+  border-color: var(--sc-cyan);
+}
+
+/* Manual Panel
+   FIX: z-index raised to 210 so it slides over the leaderboard button (z-index 200)
+   when opened, preventing the button from floating awkwardly on top. */
+#manualPanel {
+  position: absolute;
+  top: 0;
+  right: -420px;
+  width: 400px;
+  height: 100%;
+  background: rgba(8, 12, 20, 0.92);
+  border: 1px solid var(--sc-panel-border);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: -2px 0 10px rgba(0,0,0,0.25);
+  z-index: 210;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.3s ease;
+  color: var(--sc-text);
+}
+
+#manualPanel.open {
+  right: 0;
+}
+
+.manual-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 2px solid var(--sc-panel-border);
+}
+
+.manual-header h3 {
+  margin: 0;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 16px;
+  color: var(--sc-gold);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+#manualCloseBtn {
+  background: none;
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 4px;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--sc-text-dim);
+  transition: all 0.2s;
+}
+#manualCloseBtn:hover {
+  color: var(--sc-cyan);
+  border-color: var(--sc-cyan);
+}
+
+.manual-content {
+  padding: 16px;
+  overflow-y: auto;
+  font-size: 13px;
+  color: var(--sc-text);
+}
+
+.manual-content section {
+  margin-bottom: 18px;
+  border-bottom-color: rgba(52, 204, 204, 0.08);
+}
+
+.manual-content h4 {
+  margin: 0 0 6px 0;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 14px;
+  color: var(--sc-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+}
+
+.manual-content h5 {
+  margin: 10px 0 4px 0;
+  font-size: 13px;
+  color: var(--sc-gold);
+  font-weight: 600;
+}
+
+.manual-content p {
+  margin: 6px 0;
+  line-height: 1.55;
+  color: var(--sc-text);
+  font-family: 'Rajdhani', sans-serif;
+}
+
+.manual-content strong {
+  color: var(--sc-text-bright);
+}
+
+.manual-content ul {
+  padding-left: 18px;
+  margin: 6px 0;
+}
+
+.manual-content li {
+  margin-bottom: 6px;
+}
+
+.manual-content .note {
+  font-size: 12px;
+  color: var(--sc-text-dim);
+  font-style: italic;
+  background: rgba(255, 204, 51, 0.12);
+  border-left: 2px solid var(--sc-gold);
+  padding: 4px 8px;
+}
+
+/* MapLibre control overrides */
+.maplibregl-ctrl-group {
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 5px;
+  backdrop-filter: blur(14px);
+}
+.maplibregl-ctrl-group button {
+  background: transparent;
+  border-color: var(--sc-panel-border);
+}
+.maplibregl-ctrl-group button span {
+  filter: invert(1) brightness(0.8) sepia(1) hue-rotate(130deg) saturate(0.6);
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(0, 0, 0, 0.4);
+  color: rgba(176, 196, 216, 0.3);
+}
+.maplibregl-ctrl-attrib a {
+  color: var(--sc-cyan);
+  opacity: 0.4;
+}
+.maplibregl-popup-content {
+  background: rgba(10, 16, 24, 0.72);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 6px;
+  color: var(--sc-text);
+  font-family: 'Rajdhani', sans-serif;
+  backdrop-filter: blur(16px);
+}
+
+/* ── Leaderboard Button ─────────────────────────────────────── */
+#leaderboardToggleBtn {
+  position: absolute;
+  top: 12px;
+  right: 60px;
+  z-index: 10;
+  background: rgba(10, 20, 30, 0.85);
+  color: #00e5cc;
+  border: 1px solid #00e5cc44;
+  padding: 7px 14px;
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background 0.2s, border-color 0.2s;
+}
+#leaderboardToggleBtn:hover {
+  background: rgba(0, 229, 204, 0.15);
+  border-color: #00e5cc99;
+}
+
+/* ── Leaderboard Panel ──────────────────────────────────────── */
+#leaderboardPanel {
+  position: absolute;
+  top: 48px;
+  right: 12px;
+  z-index: 10;
+  width: 260px;
+  background: rgba(8, 16, 24, 0.92);
+  border: 1px solid #00e5cc33;
+  backdrop-filter: blur(12px);
+  font-family: 'Rajdhani', sans-serif;
+  color: #c8d8e8;
+  transform: translateX(110%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+#leaderboardPanel.open {
+  transform: translateX(0);
+}
+
+.leaderboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid #00e5cc22;
+}
+.leaderboard-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #00e5cc;
+}
+#leaderboardCloseBtn {
+  background: none;
+  border: none;
+  color: #6a8a9a;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+}
+#leaderboardCloseBtn:hover { color: #00e5cc; }
+
+.leaderboard-content {
+  padding: 8px 0 12px;
+}
+
+.leaderboard-section {
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid #ffffff08;
+}
+.leaderboard-section:last-child { border-bottom: none; }
+
+.leaderboard-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #4a7a9a;
+  margin-bottom: 6px;
+}
+
+.leaderboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.leaderboard-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.lb-rank {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: #4a7a9a;
+  width: 16px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.lb-rank.gold   { color: #f5c518; }
+.lb-rank.silver { color: #a8b8c8; }
+.lb-rank.bronze { color: #cd7f32; }
+.lb-sensor {
+  flex: 1;
+  color: #c8d8e8;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.lb-value {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  color: #00e5cc;
+  flex-shrink: 0;
+}
+
+/* ── Controls tab (mobile slide-out handle) ──────────────────
+   Positioned top-left with spacing. Horizontal pill button.
+   Uses position:fixed so it persists in fullscreen too.     */
+#controlsTab {
+  display: none; /* hidden on desktop; shown via media query below */
+  position: fixed;
+  top: 6px; /* was 14px with the button's own padding/border it was
+               ~34px tall, putting its bottom edge right against the
+               "BIKE ROUTES" title underline below it */
+  left: 10px;
+  transform: none;
+  z-index: 9999;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  background: var(--sc-panel-bg);
+  border: 1px solid var(--sc-panel-border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sc-cyan);
+  cursor: pointer;
+  backdrop-filter: blur(14px);
+  transition: background 0.2s, left 0.3s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+#controlsTab.open {
+  left: 224px; /* panel is 280px wide with 15px padding (same padding
+                  that insets Filter Trips and the checkboxes), and
+                  the tab itself is ~41px wide, so 280 - 15 - 41 = 224
+                  lines its right edge up with that same 15px margin. */
+}
+#controlsTab:hover {
+  background: rgba(52, 204, 204, 0.12);
+}
+
+/* Keep tab visible when the map container enters fullscreen */
+#mapContainer:fullscreen #controlsTab,
+#mapContainer:-webkit-full-screen #controlsTab,
+#mapContainer:-moz-full-screen #controlsTab,
+#mapContainer:-ms-fullscreen #controlsTab {
+  display: flex;
+  z-index: 9999;
+  position: fixed;
+  top: 14px;
+  left: 10px;
+}
+
+/* ── Mobile ──────────────────────────────────────────────────
+   FIX: Threshold raised from 768px to 900px for broader
+   mobile/tablet coverage. Controls offscreen offset matched
+   to panel width so it fully hides. */
+@media (max-width: 900px) {
+
+  /* Controls panel: collapsed off-screen by default,
+     slides in when .open is toggled by the tab button.
+     FIX: previously used `min-width: 260px` with content-box sizing
+     and `left: -280px`. min-width is a floor, not a cap, and with
+     the base rule's 15px padding + 1px border added on top (default
+     box-sizing: content-box), the panel's real width was at least
+     260 + 30 + 2 = 292px — 12px wider than the -280px offscreen
+     offset, so a sliver of it always poked into view on the left
+     edge. Fixed width (not min-width) + box-sizing: border-box makes
+     the panel's width predictable, and an offset past that width
+     (plus room for the box-shadow's blur) keeps the whole panel
+     fully off-screen while closed — same fix as the Tallinn dashboard. */
+  #controls {
+    position: fixed;
+    top: 0;
+    left: -300px;
+    width: 280px;
+    box-sizing: border-box;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    z-index: 100;
+    transition: left 0.3s ease;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  #controls.open {
+    left: 0;
+  }
+
+  /* Show the tab handle on mobile */
+  #controlsTab {
+    display: flex;
+  }
+
+  #stats,
+  .legend {
+    font-size: 12px;
+    max-width: 200px;
+  }
+
+  #manualPanel {
+    width: 100%;
+    right: -100%;
+  }
+}
+
+
+/* ── Hide leaderboard button when filters panel is open on mobile ────────────
+   Applied via JS by toggling .panel-open on #mapContainer.                   */
+@media (max-width: 900px) {
+  #mapContainer.filters-open #leaderboardToggleBtn {
+    display: none;
+  }
+}
