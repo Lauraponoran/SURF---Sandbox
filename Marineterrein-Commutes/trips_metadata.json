@@ -1,1 +1,36 @@
-{}
+{
+  "604F0_Trip1": {
+    "source_file": "DC8E95FFFE7604F0_20260824_094043.csv",
+    "Charge(start | stop)": ", 65 | 81%",
+    "WheelDiam": ", 28.0 inch",
+    "Frequency": ", 50.0 Hz",
+    "Trip stop code": ", 1 (Normal finish)",
+    "BLE Device Information Service": "BLE Device Information Service",
+    "Hardware": ", 105",
+    "Firmware": ",3.0.6",
+    "SystemID": ", DC8E95FFFE7604F0",
+    "App version": ", 1.1.5+44",
+    "Sensor's connection": ", 2026-08-24 09:40:38.526, 2026-08-24 09:44:23.104",
+    "Trip start/end": ", 2026-08-24 09:40:43.219, 2026-08-24 09:44:22.624",
+    "SENSOR": ",03:39,00:54,0.27,4.4,5.8,12.6,-2.03,20.11,--,3",
+    "GNSS": ",03:38,00:28,0.246,4,5,6,,,,,0",
+    "source": "local_csv"
+  },
+  "604F0_Trip2": {
+    "source_file": "DC8E95FFFE7604F0_20260824_095335.csv",
+    "Charge(start | stop)": ", 85 | 65%",
+    "WheelDiam": ", 28.0 inch",
+    "Frequency": ", 50.0 Hz",
+    "Trip stop code": ", 3 (BLE sensor disconnected so trip stopped by timeout)",
+    "BLE Device Information Service": "BLE Device Information Service",
+    "Hardware": ", 105",
+    "Firmware": ",3.0.6",
+    "SystemID": ", DC8E95FFFE7604F0",
+    "App version": ", 1.1.5+44",
+    "Sensor's connection": ", 2026-08-24 09:53:19.037, 2026-08-24 10:27:34.876",
+    "Trip start/end": ", 2026-08-24 09:53:35.098, 2026-08-24 10:26:41.997",
+    "SENSOR": ",33:05,01:33,10.35,18.8,19.7,46.4,-31.81,29.88,--,387",
+    "GNSS": ",33:58,02:14,10.702,19,20,36,,,,,6",
+    "source": "local_csv"
+  }
+}
