@@ -728,7 +728,7 @@ function getCrashTypeLabel(properties) {
   if (!Number.isFinite(speed)) return 'Unclassified';
   if (speed <= 1) return 'Stationary Fall';
   if (speed <= 10) return 'Low-Speed Fall';
-  return 'Moving Crash';
+  return 'High-Speed Fall';
 }
 
 function getCrashOutcomeLabel(properties) {
@@ -818,7 +818,7 @@ function setupCrashLayer(geojson, labelLayerId) {
   //
   //   Stationary Fall → ◆
   //   Low-Speed Fall  → ▲
-  //   Moving Crash    → ●
+  //   High-Speed Fall    → ●
   //   Unclassified    → ■
   // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
@@ -834,7 +834,7 @@ function setupCrashLayer(geojson, labelLayerId) {
 
         'Stationary Fall', '◆',
         'Low-Speed Fall',  '▲',
-        'Moving Crash',    '●',
+        'High-Speed Fall',    '●',
         'Unclassified',    '■',
 
         '■'
@@ -1481,7 +1481,7 @@ const CRASH_LEGEND_CATEGORIES = [
     rows: [
       { swatch: `<div class="cl-swatch cl-swatch--glyph">◆</div>`, label: 'Stationary Fall' },
       { swatch: `<div class="cl-swatch cl-swatch--glyph">▲</div>`, label: 'Low-Speed Fall' },
-      { swatch: `<div class="cl-swatch cl-swatch--glyph">●</div>`, label: 'Moving Crash' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">●</div>`, label: 'High-Speed Fall' },
       { swatch: `<div class="cl-swatch cl-swatch--glyph">■</div>`, label: 'Unclassified' },
     ]
   },
