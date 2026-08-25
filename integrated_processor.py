@@ -31,6 +31,15 @@ MIN_SEGMENT_TIME_S = SECONDS_PER_SAMPLE  # 0.02 s
 # produces large apparent speed swings that are not real braking events.
 MIN_HROT_FOR_BRAKING = 2
 
+# ─── Display-only smoothing ──────────────────────────────────────────────────
+# Raw wheel-rotation speed is segment-by-segment (irregular hrot tick spacing),
+# so consecutive segments can still show visible speed jitter on the map even
+# though each one is individually accurate. DISPLAY_SMOOTHING_WINDOW controls
+# a centered moving average over this many consecutive segments, used ONLY to
+# compute Speed_display (map color) — it never touches `Speed` (the raw value
+# used for braking detection, stats, and exports).
+DISPLAY_SMOOTHING_WINDOW = 5
+
 SKIP_TRIPS = {
 }
 
@@ -231,10 +240,41 @@ def calculate_braking_intensity(prev_speed_kmh, curr_speed_kmh, time_diff_s):
     return round(min(raw, BRAKING_INTENSITY_CAP_KMH_S), 2)
 
 
+def moving_average_speeds(raw_speeds, window=DISPLAY_SMOOTHING_WINDOW):
+    """
+    Centered moving average over a list of raw segment speeds (km/h).
+
+    Display-only smoothing: reduces segment-to-segment jitter so the map's
+    color rendering reads as continuous bands instead of speckled noise.
+    Does NOT alter the underlying raw speed values — this is a separate
+    output used only to color the map, never fed into braking detection,
+    stats, or exports.
+    """
+    n = len(raw_speeds)
+    if n == 0:
+        return []
+    half = window // 2
+    smoothed = []
+    for i in range(n):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        window_vals = raw_speeds[lo:hi]
+        smoothed.append(sum(window_vals) / len(window_vals))
+    return smoothed
+
+
 def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
     """Process a single GeoJSON file: clean, calculate speeds, add road quality.
 
     Speed is calculated from wheel rotations (HRot) recorded in the local CSV.
+
+    Every segment carries two speed properties:
+      - Speed:         raw computed speed (unchanged). Used for braking
+                        detection, trip stats, and any export/analysis.
+      - Speed_display:  smoothed speed used only for map coloring — a
+                        centered rolling average over DISPLAY_SMOOTHING_WINDOW
+                        consecutive segments. Raw Speed is untouched; braking
+                        detection always reads Speed, never Speed_display.
 
     Braking detection requires hrot_diff >= MIN_HROT_FOR_BRAKING so that
     single-tick segments (whose timing noise mimics large decelerations) are
@@ -490,7 +530,15 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         
         if not new_features:
             return None, file_metadata
-        
+
+        # Display-only smoothing: compute Speed_display as a centered rolling
+        # average of raw Speed across consecutive segments. Never overwrites
+        # Speed itself — braking detection above already ran on raw values.
+        raw_speeds = [f['properties']['Speed'] for f in new_features]
+        smoothed_speeds = moving_average_speeds(raw_speeds)
+        for feat, smoothed in zip(new_features, smoothed_speeds):
+            feat['properties']['Speed_display'] = round(smoothed, 1)
+
         if quality_lookup:
             qualities = [f['properties']['road_quality'] for f in new_features]
             quality_counts = np.bincount(qualities, minlength=6)[1:]

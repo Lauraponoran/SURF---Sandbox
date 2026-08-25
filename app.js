@@ -62,7 +62,7 @@ function getFirstLabelLayerId() {
 
 // ─── Colour expressions ───────────────────────────────────────────────────────
 function getSpeedColorExpression(mode) {
-  const v = ['to-number', ['coalesce', ['get', 'Speed'], ['get', 'speed'], 0]];
+  const v = ['to-number', ['coalesce', ['get', 'Speed_display'], ['get', 'Speed'], ['get', 'speed'], 0]];
   if (mode === 'gradient') {
     return ['interpolate', ['linear'], v, 0,'#808080', 2,'#DC2626', 5,'#F97316', 10,'#FACC15', 15,'#22C55E', 20,'#3B82F6', 25,'#bb06d7'];
   }
