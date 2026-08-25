@@ -242,21 +242,6 @@
       </label>
     </div>
 
-    <div class="radio-group" id="crashModeGroup" style="display:none;">
-      <label class="radio-label">
-        <input type="radio" name="crashMode" value="intensity" checked>
-        Impact Intensity
-      </label>
-      <label class="radio-label">
-        <input type="radio" name="crashMode" value="type">
-        Accident Type
-      </label>
-      <label class="radio-label">
-        <input type="radio" name="crashMode" value="outcome">
-        Outcome
-      </label>
-    </div>
-
     <div class="control-group">
       <div class="control-label">TRAVEL RANGE</div>
       <label class="toggle-container iso-spacing">
@@ -351,29 +336,11 @@
     <div class="speed-legend-item"><div class="speed-color-box" style="background:#9C27B0;"></div><span>20+ events</span></div>
   </div>
 
-  <!-- Crash / fall legend — classification mode switches with the crash sub-toggle -->
+  <!-- Crash / fall legend — populated once by renderCrashLegend(); all three
+       dimensions (intensity/type/outcome) are shown at once, so there's no
+       mode to switch and no sub-blocks to toggle. -->
   <div class="legend" id="crashLegend" style="display:none;">
-    <strong>CRASHES &amp; FALLS</strong>
-    <p id="crashLegendNote" style="margin:4px 0 8px; font-size:0.75rem; opacity:0.8;">Colour = impact intensity</p>
-
-    <div id="crashLegend-intensity">
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#ffea00;"></div><span>Minor (&lt;8g)</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#ff9100;"></div><span>Hard (8–&lt;11g)</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#ff1744;"></div><span>Severe (11g+)</span></div>
-    </div>
-
-    <div id="crashLegend-type" style="display:none;">
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#8B5CF6;"></div><span>Stationary Fall</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#F59E0B;"></div><span>Low-Speed Fall</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#06B6D4;"></div><span>Moving Crash</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#9CA3AF;"></div><span>Unclassified</span></div>
-    </div>
-
-    <div id="crashLegend-outcome" style="display:none;">
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#22C55E;"></div><span>Resolved</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#EF4444;"></div><span>Unresolved</span></div>
-      <div class="speed-legend-item"><div class="speed-color-box" style="background:#9CA3AF;"></div><span>Unclassified</span></div>
-    </div>
+    <!-- populated dynamically by renderCrashLegend() -->
   </div>
 
   <div class="legend" id="sensorLegend" style="display:none;">

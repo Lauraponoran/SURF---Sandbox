@@ -31,12 +31,6 @@ let activeFilter = null;
 let showBraking = false;
 let showCrashes = false;
 
-// Crash display classification:
-//   intensity = Minor / Hard / Severe
-//   type      = Stationary Fall / Low-Speed Fall / Moving Crash / Unclassified
-//   outcome   = Resolved / Unresolved
-let crashClassification = 'intensity';
-
 // ─── Sensor colours ───────────────────────────────────────────────────────────
 const SENSOR_COLORS = [
   '#34CCCC','#FFCC33','#5B8FFF','#CC5BAA','#33CCAA',
@@ -387,8 +381,6 @@ function resetSelection() {
   showAveragedSegments = false;
   showBraking          = false;
   showCrashes          = false;
-  crashClassification  = 'intensity';
-  showCrashes          = false;
 
   if (currentPopup) { currentPopup.remove(); currentPopup = null; }
   applyTripFilter(null);
@@ -417,9 +409,6 @@ function resetSelection() {
   if (map.getLayer('crash-events-halo'))
     map.setLayoutProperty('crash-events-halo', 'visibility', 'none');
   if (map.getLayer('crash-events-dot'))
-    map.setLayoutProperty('crash-events-dot', 'visibility', 'none');
-
-    if (map.getLayer('crash-events-dot'))
     map.setLayoutProperty('crash-events-dot', 'visibility', 'none');
 
   if (map.getLayer('trips-layer')) {
@@ -714,37 +703,11 @@ function setupBrakingLayer(geojson, labelLayerId) {
 }
 
 // ─── Crash / fall events ────────────────────────────────────────────────────
-function getCrashTypeExpression() {
-  return [
-    'match', ['get', 'crash_type'],
-    'Stationary Fall', '#9C27B0',
-    'Low-Speed Fall',  '#FFCC33',
-    'Moving Crash',    '#2196F3',
-    'Unclassified',    '#9E9E9E',
-    /* default */      '#9E9E9E',
-  ];
-}
-
-function getCrashOutcomeExpression() {
-  return [
-    'match', ['get', 'crash_outcome'],
-    'Resolved',   '#2196F3',
-    'Unresolved', '#E91E63',
-    'Unclassified', '#9E9E9E',
-    /* default */ '#9E9E9E',
-  ];
-}
-
+// Colour is a fixed channel: it always encodes impact intensity. Type is
+// encoded by glyph shape and outcome by a stroke ring (see setupCrashLayer) —
+// each dimension gets its own dedicated channel, all shown at once, with
+// nothing left to toggle or remap.
 function getCrashColorExpression() {
-  if (crashClassification === 'type') {
-    return getCrashTypeExpression();
-  }
-
-  if (crashClassification === 'outcome') {
-    return getCrashOutcomeExpression();
-  }
-
-  // Default = impact intensity
   return [
     'match', ['get', 'severity'],
     'Severe', '#ff1744',
@@ -782,29 +745,6 @@ function getCrashOutcomeLabel(properties) {
   return 'Unclassified';
 }
 
-function updateCrashLayerColors() {
-  if (!map.getLayer('crash-events-halo') ||
-      !map.getLayer('crash-events-dot')) {
-    return;
-  }
-
-  const colorExpression = getCrashColorExpression();
-
-  map.setPaintProperty(
-    'crash-events-halo',
-    'circle-color',
-    colorExpression
-  );
-
-  map.setPaintProperty(
-    'crash-events-dot',
-    'circle-color',
-    colorExpression
-  );
-
-  renderCrashLegend();
-}
-
 function buildCrashFeatures(features) {
   const crashFeatures = (features || []).filter(f =>
     f?.geometry?.type === 'Point' &&
@@ -828,11 +768,10 @@ function setupCrashLayer(geojson, labelLayerId) {
   // ─────────────────────────────────────────────────────────────────────────
   // CRASH HALO
   //
-  // Outcome is represented by the halo:
-  //   Resolved   → smaller / softer halo
-  //   Unresolved → larger / stronger halo
-  //
-  // Intensity still controls the colour.
+  // A plain, fixed backdrop that just helps the glyph pop off the basemap —
+  // it no longer encodes anything on its own. Outcome is represented instead
+  // by a crisp stroke ring on this same layer: a sharp, un-blurred outline
+  // reads far more clearly at map scale than a blur/opacity difference did.
   // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-halo',
@@ -842,47 +781,32 @@ function setupCrashLayer(geojson, labelLayerId) {
       visibility: 'none'
     },
     paint: {
-      'circle-color': getCrashColorExpression(),
+      'circle-color': '#000000',
+      'circle-opacity': 0.35,
+      'circle-blur': 0.6,
 
       'circle-radius': [
         'interpolate',
         ['linear'],
         ['zoom'],
-        10,
-        [
-          'case',
-          ['==', ['get', 'crash_outcome'], 'Unresolved'],
-          18,
-          10
-        ],
-        14,
-        [
-          'case',
-          ['==', ['get', 'crash_outcome'], 'Unresolved'],
-          29,
-          16
-        ],
-        17,
-        [
-          'case',
-          ['==', ['get', 'crash_outcome'], 'Unresolved'],
-          42,
-          23
-        ]
+        10, 12,
+        14, 18,
+        17, 26
       ],
 
-      'circle-blur': [
+      // Outcome = a bold stroke ring. Sharp edge, not blurred.
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        0.55,
-        0.75
+        3,
+        0
       ],
-
-      'circle-opacity': [
+      'circle-stroke-opacity': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        0.80,
-        0.40
+        1,
+        0
       ],
 
       'circle-pitch-alignment': 'map'
@@ -900,7 +824,8 @@ function setupCrashLayer(geojson, labelLayerId) {
   //   Moving Crash    → ●
   //   Unclassified    → ■
   //
-  // Intensity still controls the colour.
+  // Intensity still controls the colour. Halo width is now fixed — it no
+  // longer tries to double up as an outcome indicator (see the ring above).
   // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-dot',
@@ -938,14 +863,8 @@ function setupCrashLayer(geojson, labelLayerId) {
       // Intensity = colour
       'text-color': getCrashColorExpression(),
 
-      'text-halo-color': '#ffffff',
-
-      'text-halo-width': [
-        'case',
-        ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        4,
-        2
-      ],
+      'text-halo-color': '#000000',
+      'text-halo-width': 1.5,
 
       'text-opacity': 1
     }
@@ -1015,23 +934,6 @@ function setupCrashControls() {
   const cb = document.getElementById('crashCheckbox');
   if (!cb) return;
 
-  const classificationRadios =
-    document.querySelectorAll('input[name="crashClassification"]');
-
-  classificationRadios.forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      crashClassification = e.target.value;
-
-      if (showCrashes) {
-        updateCrashLayerColors();
-      } else {
-        renderCrashLegend();
-      }
-
-      setTimeout(updateLegendPositions, 50);
-    });
-  });
-
   cb.addEventListener('change', (e) => {
     showCrashes = e.target.checked;
 
@@ -1056,10 +958,6 @@ function setupCrashControls() {
 
     if (legend) {
       legend.style.display = showCrashes ? 'block' : 'none';
-    }
-
-    if (showCrashes) {
-      updateCrashLayerColors();
     }
 
     updateResetButtonVisibility();
@@ -1215,6 +1113,7 @@ map.on('load', async () => {
     setupControls();
     updateStatsFromMetadata();
     renderSensorLegend();
+    renderCrashLegend();
     updateStatsVisibility();
 
   } catch (err) {
@@ -1288,36 +1187,45 @@ function updateLegendPositions() {
     .map(id => document.getElementById(id))
     .filter(el => el && getComputedStyle(el).display !== 'none');
 
-  if (mobile) {
-    let b = 10;
+  const GAP = 10;
+  let prev = null;
 
+  // Each box is anchored to the measured, rendered position of the box
+  // before it (getBoundingClientRect), rather than a pre-computed width/
+  // height guess. That guess only matched reality as long as nothing
+  // changed a box's actual rendered size between the guess and the paint —
+  // the crash legend rebuilds its content mid-flight, so it was the one
+  // box guaranteed to drift out of sync with a pre-computed offset.
+  if (mobile) {
     if (sensorVisible) {
       sensorLegend.style.right = '10px';
-      sensorLegend.style.bottom = `${b}px`;
-      b += (sensorLegend.offsetHeight || 150) + 8;
+      sensorLegend.style.bottom = '10px';
+      prev = sensorLegend;
     }
 
     others.forEach(el => {
       el.style.right = '10px';
-      el.style.bottom = `${b}px`;
-      b += (el.offsetHeight || 150) + 8;
+      el.style.bottom = prev
+        ? `${(window.innerHeight - prev.getBoundingClientRect().top) + 8}px`
+        : '10px';
+      prev = el;
     });
 
   } else {
     // Sensors stays closest to the right edge.
-    let r = 10;
-
     if (sensorVisible) {
       sensorLegend.style.bottom = '10px';
-      sensorLegend.style.right = `${r}px`;
-      r += (sensorLegend.offsetWidth || 220) + 10;
+      sensorLegend.style.right = '10px';
+      prev = sensorLegend;
     }
 
     // Every other visible legend is placed immediately to its left.
     others.forEach(el => {
       el.style.bottom = '10px';
-      el.style.right = `${r}px`;
-      r += (el.offsetWidth || 220) + 10;
+      el.style.right = prev
+        ? `${(window.innerWidth - prev.getBoundingClientRect().left) + GAP}px`
+        : '10px';
+      prev = el;
     });
   }
 }
@@ -1561,40 +1469,10 @@ function renderCrashLegend() {
   const legend = document.getElementById('crashLegend');
   if (!legend) return;
 
+  // Static content — three dimensions, three dedicated channels, all shown
+  // at once. Nothing here toggles or remaps, so this only needs to run once.
   legend.innerHTML = `
     <strong>CRASHES &amp; FALLS</strong>
-
-    <div class="radio-group" style="margin:6px 0 8px;">
-      <label class="radio-label">
-        <input
-          type="radio"
-          name="crashClassification"
-          value="intensity"
-          ${crashClassification === 'intensity' ? 'checked' : ''}
-        >
-        Impact intensity
-      </label>
-
-      <label class="radio-label">
-        <input
-          type="radio"
-          name="crashClassification"
-          value="type"
-          ${crashClassification === 'type' ? 'checked' : ''}
-        >
-        Accident type
-      </label>
-
-      <label class="radio-label">
-        <input
-          type="radio"
-          name="crashClassification"
-          value="outcome"
-          ${crashClassification === 'outcome' ? 'checked' : ''}
-        >
-        Outcome
-      </label>
-    </div>
 
     <p style="margin:6px 0 8px; font-size:0.75rem; opacity:0.8;">
       All three dimensions are shown simultaneously:
@@ -1639,51 +1517,16 @@ function renderCrashLegend() {
 
     <div style="margin-top:8px;">
       <div class="speed-legend-item">
-        <span style="font-size:16px; width:20px; text-align:center;">◉</span>
-        <span><strong>Normal halo</strong> = Resolved</span>
+        <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,0.35);"></span>
+        <span>Resolved</span>
       </div>
 
       <div class="speed-legend-item">
-        <span style="font-size:16px; width:20px; text-align:center;">◎</span>
-        <span><strong>Large halo</strong> = Unresolved</span>
+        <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,0.35);border:3px solid #fff;"></span>
+        <span>Unresolved (white ring)</span>
       </div>
     </div>
   `;
-
-  // Re-bind the radios because the legend HTML is rebuilt dynamically.
-  legend
-    .querySelectorAll('input[name="crashClassification"]')
-    .forEach(radio => {
-      radio.addEventListener('change', (e) => {
-        crashClassification = e.target.value;
-
-        // The selected mode controls the legend emphasis,
-        // while colour/shape/halo remain visible simultaneously.
-        renderCrashLegend();
-
-        if (map.getLayer('crash-events-halo')) {
-          map.setPaintProperty(
-            'crash-events-halo',
-            'circle-opacity',
-            crashClassification === 'outcome'
-              ? [
-                  'case',
-                  ['==', ['get', 'crash_outcome'], 'Unresolved'],
-                  0.85,
-                  0.20
-                ]
-              : [
-                  'case',
-                  ['==', ['get', 'crash_outcome'], 'Unresolved'],
-                  0.65,
-                  0.28
-                ]
-          );
-        }
-
-        setTimeout(updateLegendPositions, 50);
-      });
-    });
 }
 
 function updateStatsFromMetadata() {
