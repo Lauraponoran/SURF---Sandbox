@@ -1,6 +1,6 @@
 {
-  "NORMA_Trip1": {
-    "source_file": "DC8E95FFFE7NORMA_20260824_095335.csv",
+  "604F0_Trip1": {
+    "source_file": "DC8E95FFFE7604F0_20260824_095335.csv",
     "Charge(start | stop)": ", 85 | 65%",
     "WheelDiam": ", 28.0 inch",
     "Frequency": ", 50.0 Hz",
@@ -16,8 +16,8 @@
     "GNSS": ",33:58,02:14,10.702,19,20,36,,,,,6",
     "source": "local_csv"
   },
-  "CRASH_Trip1": {
-    "source_file": "DC8E95FFFE7CRASH_20260824_094043.csv",
+  "NORMA_Trip1": {
+    "source_file": "DC8E95FFFE7NORMA_20260824_094043.csv",
     "Charge(start | stop)": ", 65 | 81%",
     "WheelDiam": ", 28.0 inch",
     "Frequency": ", 50.0 Hz",

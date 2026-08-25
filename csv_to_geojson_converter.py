@@ -4,9 +4,6 @@ import os
 import re
 import sys
 from datetime import datetime
-from dotenv import load_dotenv
-
-load_dotenv()
 
 INPUT_ROOT = "csv_data"       # where CSVs live
 OUTPUT_ROOT = "sensor_data"   # where cleaned GeoJSONs + metadata go
@@ -14,229 +11,6 @@ OUTPUT_ROOT = "sensor_data"   # where cleaned GeoJSONs + metadata go
 # Speed spike filtering
 MAX_BIKE_SPEED_KMH = 60       # hard cap — anything above this is physically implausible
 MAX_NEIGHBOUR_RATIO = 2.5     # a point is a spike if it's >2.5x both its neighbours
-
-# Supabase connection details — loaded from .env
-SUPABASE_HOST     = os.getenv("SUPABASE_HOST")
-SUPABASE_PORT     = int(os.getenv("SUPABASE_PORT", 6543))
-SUPABASE_DB       = os.getenv("SUPABASE_DB")
-SUPABASE_USER     = os.getenv("SUPABASE_USER")
-SUPABASE_PASSWORD = os.getenv("SUPABASE_PASSWORD")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Supabase fetch
-# ─────────────────────────────────────────────────────────────────────────────
-
-RECONSTRUCTION_QUERY = """
-with params as (
-    select {trip_id}::int as trip_id
-),
-marker_bounds as (
-    select
-        p.trip_id,
-        (
-            select d1.samples
-            from public.data1 d1
-            where d1.trip_id = p.trip_id and d1.marker = 9
-            order by d1.samples limit 1
-        ) as start_sample,
-        (
-            select d1.samples
-            from public.data1 d1
-            where d1.trip_id = p.trip_id and d1.marker = 10
-            order by d1.samples limit 1
-        ) as end_sample
-    from params p
-),
-x as (
-    select
-        rd.trip_id,
-        rd.samples as raw_samples,
-        rd.samples - 9 + gs.i as output_samples,
-        trim(vals[gs.i * 4 + 1])::integer as acc_low,
-        trim(vals[gs.i * 4 + 2])::integer as acc_high
-    from (
-        select
-            rd.trip_id,
-            rd.samples,
-            string_to_array(
-                replace(replace(convert_from(rd.data, 'UTF8'), '[', ''), ']', ''),
-                ','
-            ) as vals
-        from public.raw_data rd
-        join marker_bounds mb on mb.trip_id = rd.trip_id
-        where rd.trip_id = (select trip_id from params)
-          and rd.samples >= mb.start_sample
-          and rd.samples - 9 <= mb.end_sample
-    ) rd
-    cross join generate_series(0, 9) as gs(i)
-),
-x_filtered as (
-    select x.*
-    from x
-    join marker_bounds mb on mb.trip_id = x.trip_id
-    where x.output_samples >= mb.start_sample
-      and x.output_samples <= mb.end_sample
-),
-base as (
-    select
-        x.*,
-        (select d1.marker from public.data1 d1
-         where d1.trip_id = x.trip_id and d1.samples = x.output_samples
-           and d1.marker != 1 and d1.marker != 3 limit 1) as marker,
-        (select d1.h_rot from public.data1 d1
-         where d1.trip_id = x.trip_id and d1.samples = x.output_samples
-           and d1.marker != 1 and d1.marker != 3 limit 1) as hrot,
-        (select d1.speed from public.data1 d1
-         where d1.trip_id = x.trip_id and d1.samples = x.output_samples
-           and d1.marker != 1 and d1.marker != 3 limit 1) as speed,
-        (select d1."timestamp" from public.data1 d1
-         where d1.trip_id = x.trip_id and d1.samples = x.output_samples
-           and d1.marker != 1 and d1.marker != 3 limit 1) as d1_ts
-    from x_filtered x
-)
-select
-    g.latitude                          as latitude,
-    g.longitude                         as longitude,
-    b.marker                            as marker,
-    round((
-        case
-            when (b.acc_low + b.acc_high * 256) >= 32768
-                then (b.acc_low + b.acc_high * 256) - 65536
-            else (b.acc_low + b.acc_high * 256)
-        end
-    ) / 1024.0, 3)                      as "Acc Y (g)",
-    b.hrot                              as "HRot Count",
-    b.speed                             as "Speed",
-    b.output_samples                    as "Samples",
-    g.heading                           as "Heading GPS (dg)",
-    g.speed                             as "Speed GPS",
-    g.accuracy                          as "Accuracy GPS",
-    g.altitude                          as "Altitude GPS",
-    g."timestamp"                       as "GNSS Timestamp",
-    to_char(b.d1_ts at time zone 'Europe/Amsterdam', 'HH24:MI:SS') as "HH:mm:ss",
-    to_char(b.d1_ts, 'MS')             as "SSS"
-from base b
-left join lateral (
-    select g.latitude, g.longitude, g.heading, g.speed,
-           g.accuracy, g.altitude, g."timestamp"
-    from public.gnss g
-    where g.trip_id = b.trip_id and b.d1_ts is not null
-    order by abs(extract(epoch from (g."timestamp" - b.d1_ts)))
-    limit 1
-) g on true
-order by b.raw_samples, b.output_samples;
-"""
-
-
-def get_supabase_connection():
-    """Return a psycopg2 connection to Supabase, or raise with a clear message."""
-    try:
-        import psycopg2
-    except ImportError:
-        print("  ❌ psycopg2 is not installed. Run: pip install psycopg2-binary")
-        sys.exit(1)
-
-    return psycopg2.connect(
-        host=SUPABASE_HOST,
-        port=SUPABASE_PORT,
-        dbname=SUPABASE_DB,
-        user=SUPABASE_USER,
-        password=SUPABASE_PASSWORD,
-        sslmode="require",
-    )
-
-
-def _normalise_ts(ts):
-    """Return a stripped string for timestamp comparison (strips microseconds noise)."""
-    if ts is None:
-        return None
-    return str(ts).strip()
-
-
-def build_existing_ts_index(all_metadata):
-    """
-    Build a set of (trip_start, trip_end) strings from existing metadata so we
-    can quickly check whether a Supabase trip has already been processed.
-    """
-    index = set()
-    for entry in all_metadata.values():
-        raw = entry.get("Trip start/end", "")
-        # Format stored in metadata: ", 2026-04-09 16:43:08.998, 2026-04-09 16:49:17.797"
-        parts = [p.strip() for p in raw.split(",") if p.strip()]
-        if len(parts) >= 2:
-            index.add((parts[0], parts[1]))
-    return index
-
-
-def fetch_trips_from_supabase(all_metadata):
-    """
-    Query Supabase for all trips, skip ones already in metadata (by
-    trip_start / trip_end), reconstruct CSV rows for new trips, write
-    them to csv_data/, and return a dict of {filename: trip_metadata}.
-    """
-    print("\n🌐 Connecting to Supabase…")
-    conn = get_supabase_connection()
-    cur = conn.cursor()
-
-    # ── 1. List all trips ────────────────────────────────────────────────────
-    cur.execute("""
-        SELECT id, trip_start, trip_end, system_id
-        FROM public.trips
-        ORDER BY trip_start;
-    """)
-    trips = cur.fetchall()
-    print(f"  Found {len(trips)} trip(s) in Supabase.")
-
-    existing_ts = build_existing_ts_index(all_metadata)
-    os.makedirs(INPUT_ROOT, exist_ok=True)
-
-    new_files = {}   # filename → trip metadata dict for newly fetched trips
-
-    for (trip_id, trip_start, trip_end, system_id) in trips:
-        ts_key = (_normalise_ts(trip_start), _normalise_ts(trip_end))
-
-        if ts_key in existing_ts:
-            print(f"  ⏭️  Trip {trip_id} ({trip_start}) already processed — skipping.")
-            continue
-
-        print(f"  ⬇️  Fetching trip {trip_id} ({trip_start} → {trip_end})…")
-
-        # ── 2. Reconstruct rows ──────────────────────────────────────────────
-        cur.execute(RECONSTRUCTION_QUERY.format(trip_id=trip_id))
-        rows = cur.fetchall()
-        col_names = [desc[0] for desc in cur.description]
-
-        if not rows:
-            print(f"     ⚠️  No data rows returned — skipping.")
-            continue
-
-        # ── 3. Write temporary CSV ───────────────────────────────────────────
-        # Convert signed int system_id to the same hex slug used by local CSVs:
-        # e.g. -2553939011954146614 → 0xDC8E95FFFE7602D3 → last 5 chars → "602D3"
-        if system_id is not None:
-            sid_slug = hex(system_id & 0xFFFFFFFFFFFFFFFF).upper()[-5:]
-        else:
-            sid_slug = str(trip_id)
-        filename = f"API_{sid_slug}_{trip_start.strftime('%Y%m%d_%H%M%S')}.csv"
-        csv_path = os.path.join(INPUT_ROOT, filename)
-
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(col_names)
-            writer.writerows(rows)
-
-        # ── 4. Build the metadata we'd normally parse from the footer ────────
-        trip_meta = {
-            "Trip start/end": f", {_normalise_ts(trip_start)}, {_normalise_ts(trip_end)}",
-            "source": "api",
-            "supabase_trip_id": trip_id,
-        }
-        new_files[filename] = trip_meta
-        print(f"     ✅ Written {len(rows)} rows → {csv_path}")
-
-    cur.close()
-    conn.close()
-    return new_files
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,15 +48,14 @@ def filter_gnss_max_speed(gnss_value):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Per-row timestamp extraction (used for both local/manual and API CSVs)
+# Per-row timestamp extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Known/likely column names, matched case-insensitively. API-fetched rows are
-# guaranteed to have "GNSS Timestamp" (see RECONSTRUCTION_QUERY above); local
-# hardware CSVs aren't guaranteed to use the same header, so we also fall back
-# to any column whose name simply *contains* "timestamp", or common date-only
-# variants. If a device CSV turns out to use something else entirely, add its
-# exact header here.
+# Known/likely column names, matched case-insensitively. Local hardware CSVs
+# aren't guaranteed to use the same header, so we fall back to any column
+# whose name simply *contains* "timestamp", or common date-only variants.
+# If a device CSV turns out to use something else entirely, add its exact
+# header here.
 _TIMESTAMP_KEY_CANDIDATES = ('gnss timestamp', 'timestamp', 'datetime', 'date time', 'date')
 
 _TIMESTAMP_FORMATS = (
@@ -317,7 +90,7 @@ def extract_row_timestamp(row):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trip numbering (unchanged)
+# Trip numbering
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_next_trip_number(sensor_id_folder):
@@ -333,14 +106,11 @@ def get_next_trip_number(sensor_id_folder):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSV → GeoJSON (unchanged logic, source tag added)
+# CSV → GeoJSON
 # ─────────────────────────────────────────────────────────────────────────────
 
-def process_csv(input_path, sensor_id, trip_num, extra_meta=None):
-    """
-    Convert a CSV file to GeoJSON features + metadata dict.
-    extra_meta: optional dict merged into metadata (used for API-sourced trips).
-    """
+def process_csv(input_path, sensor_id, trip_num):
+    """Convert a local CSV file to GeoJSON features + metadata dict."""
     features = []
     coords = []
     last_lat, last_lon = None, None
@@ -381,55 +151,47 @@ def process_csv(input_path, sensor_id, trip_num, extra_meta=None):
 
     metadata = {}
 
-    # For API-sourced CSVs there is no footer — skip footer parsing
-    is_api = (extra_meta or {}).get("source") == "api"
+    with open(input_path, "r") as f:
+        lines = f.readlines()
 
-    if not is_api:
-        with open(input_path, "r") as f:
-            lines = f.readlines()
-
-        last_gps_line = 0
-        for i, line in enumerate(lines):
-            parts = line.strip().split(',')
-            if len(parts) >= 2:
-                try:
-                    float(parts[0]); float(parts[1])
-                    last_gps_line = i
-                except ValueError:
-                    continue
-
-        for line in lines[last_gps_line + 1:]:
-            line = line.strip()
-            if not line:
+    last_gps_line = 0
+    for i, line in enumerate(lines):
+        parts = line.strip().split(',')
+        if len(parts) >= 2:
+            try:
+                float(parts[0]); float(parts[1])
+                last_gps_line = i
+            except ValueError:
                 continue
-            if line.startswith(','):
-                continue
-            if ':' in line:
-                key, val = line.split(':', 1)
-                key = key.strip()
-                if key and not key[0].isdigit():
-                    metadata[key] = val.strip()
-            elif line == "BLE Device Information Service":
-                metadata[line] = line
-            elif line.startswith('SENSOR,') or line.startswith('GNSS,'):
-                parts = line.split(',', 1)
-                if len(parts) == 2:
-                    raw_value = ',' + parts[1]
-                    if parts[0] == 'GNSS':
-                        raw_value = filter_gnss_max_speed(raw_value)
-                    metadata[parts[0]] = raw_value
 
-        metadata["source"] = "local_csv"
+    for line in lines[last_gps_line + 1:]:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith(','):
+            continue
+        if ':' in line:
+            key, val = line.split(':', 1)
+            key = key.strip()
+            if key and not key[0].isdigit():
+                metadata[key] = val.strip()
+        elif line == "BLE Device Information Service":
+            metadata[line] = line
+        elif line.startswith('SENSOR,') or line.startswith('GNSS,'):
+            parts = line.split(',', 1)
+            if len(parts) == 2:
+                raw_value = ',' + parts[1]
+                if parts[0] == 'GNSS':
+                    raw_value = filter_gnss_max_speed(raw_value)
+                metadata[parts[0]] = raw_value
 
-        # Derive a trip-level date range from the per-row timestamps we just
-        # extracted, mirroring the "Trip start/end" field API-sourced trips
-        # already carry — keeps metadata consistent across both sources.
-        row_timestamps = [f["properties"].get("timestamp") for f in features if f["properties"].get("timestamp")]
-        if row_timestamps and "Trip start/end" not in metadata:
-            metadata["Trip start/end"] = f", {row_timestamps[0]}, {row_timestamps[-1]}"
-    else:
-        # Merge API metadata (trip_start/end, source tag, supabase_trip_id, etc.)
-        metadata.update(extra_meta or {})
+    metadata["source"] = "local_csv"
+
+    # Derive a trip-level date range from the per-row timestamps we just
+    # extracted.
+    row_timestamps = [f["properties"].get("timestamp") for f in features if f["properties"].get("timestamp")]
+    if row_timestamps and "Trip start/end" not in metadata:
+        metadata["Trip start/end"] = f", {row_timestamps[0]}, {row_timestamps[-1]}"
 
     return features, metadata
 
@@ -438,7 +200,7 @@ def process_csv(input_path, sensor_id, trip_num, extra_meta=None):
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main(use_api=False):
+def main():
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
     os.makedirs(INPUT_ROOT, exist_ok=True)
 
@@ -448,13 +210,6 @@ def main(use_api=False):
             all_metadata = json.load(f)
     else:
         all_metadata = {}
-
-    # ── Optional: fetch new trips from Supabase ───────────────────────────────
-    api_meta_by_file = {}   # filename → pre-built metadata from Supabase
-    if use_api:
-        api_meta_by_file = fetch_trips_from_supabase(all_metadata)
-        if not api_meta_by_file:
-            print("  ℹ️  No new trips to fetch from Supabase.")
 
     # ── Process all CSVs in csv_data/ ────────────────────────────────────────
     processed_any = False
@@ -472,26 +227,16 @@ def main(use_api=False):
 
         for input_file in csv_files:
             file = os.path.basename(input_file)
-            first_segment = file.split("_")[0]
+            sensor_id = file.split("_")[0][-5:]
 
-            # API files are named API_<slug>_<date>.csv
-            if first_segment == "API":
-                sensor_id = file.split("_")[1]
-            else:
-                sensor_id = first_segment[-5:]
-
-            # ── Deduplication for local CSVs ──────────────────────────────────
-            # API trips were already deduplicated before writing; local CSVs
-            # use source_file as a secondary guard (cheap, avoids re-processing
-            # a file that was previously loaded locally).
-            if first_segment != "API":
-                already = any(
-                    v.get("source_file") == file
-                    for v in all_metadata.values()
-                )
-                if already:
-                    print(f"⏭️  {file} already in metadata — skipping.")
-                    continue
+            # ── Deduplication ─────────────────────────────────────────────────
+            already = any(
+                v.get("source_file") == file
+                for v in all_metadata.values()
+            )
+            if already:
+                print(f"⏭️  {file} already in metadata — skipping.")
+                continue
 
             # ── Assign trip number ────────────────────────────────────────────
             sensor_output = os.path.join(OUTPUT_ROOT, sensor_id)
@@ -499,10 +244,7 @@ def main(use_api=False):
             trip_num = get_next_trip_number(sensor_output)
             trip_id  = f"{sensor_id}_Trip{trip_num}"
 
-            # Pull pre-built API metadata if available
-            extra_meta = api_meta_by_file.get(file)
-
-            features, metadata = process_csv(input_file, sensor_id, trip_num, extra_meta)
+            features, metadata = process_csv(input_file, sensor_id, trip_num)
 
             geojson = {"type": "FeatureCollection", "features": features}
             out_geojson = os.path.join(sensor_output, f"{trip_id}_clean.geojson")
@@ -516,8 +258,7 @@ def main(use_api=False):
             with open(metadata_index_file, "w", encoding="utf-8") as f:
                 json.dump(all_metadata, f, indent=2)
 
-            source_label = "🌐 API" if (extra_meta or {}).get("source") == "api" else "📄 CSV"
-            print(f"✅ {source_label} {file} → {trip_id}_clean.geojson in {sensor_output}")
+            print(f"✅ 📄 CSV {file} → {trip_id}_clean.geojson in {sensor_output}")
             processed_any = True
 
     if not processed_any:
@@ -525,6 +266,4 @@ def main(use_api=False):
 
 
 if __name__ == "__main__":
-    # Pass --api flag to enable Supabase fetching
-    use_api = "--api" in sys.argv
-    main(use_api=use_api)
+    main()

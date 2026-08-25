@@ -15,7 +15,7 @@ OUTPUT_ROOT = "processed_sensor_data"
 
 # Braking detection: flag a segment when deceleration exceeds this threshold.
 # Units: km/h lost per second. 5 = firm intentional braking; lower = more sensitive.
-BRAKING_DECEL_THRESHOLD_KMH_S = 40
+BRAKING_DECEL_THRESHOLD_KMH_S = 5.0
 
 # Braking sanity caps
 # Hard ceiling on deceleration rate — anything above this is a data artefact.
@@ -26,8 +26,7 @@ SPEED_JUMP_THRESHOLD_KMH = 20
 # Minimum plausible time for a segment (one sample interval).
 # Segments shorter than this produce unreliable deceleration estimates.
 MIN_SEGMENT_TIME_S = SECONDS_PER_SAMPLE  # 0.02 s
-# Minimum wheel-rotation ticks for a segment to be used in braking detection
-# (CSV path only — API trips use GPS speed and set hrot_diff=0 by design).
+# Minimum wheel-rotation ticks for a segment to be used in braking detection.
 # hrot_diff=1 is a single half-rotation tick: timing noise at this resolution
 # produces large apparent speed swings that are not real braking events.
 MIN_HROT_FOR_BRAKING = 2
@@ -47,11 +46,6 @@ def load_metadata():
         except Exception as e:
             print(f"⚠️  Could not load metadata file: {e}")
     return {}
-
-def is_api_trip(trip_id, saved_metadata):
-    """Return True if this trip was fetched from the Supabase API."""
-    entry = saved_metadata.get(trip_id, {})
-    return entry.get("source") == "api"
 
 def parse_time(time_str, milliseconds):
     """Parse HH:mm:ss and SSS into datetime"""
@@ -239,17 +233,12 @@ def calculate_braking_intensity(prev_speed_kmh, curr_speed_kmh, time_diff_s):
 
 def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
     """Process a single GeoJSON file: clean, calculate speeds, add road quality.
-    
-    For API-sourced trips (source == 'api' in trips_metadata.json), speed is
-    taken directly from the 'Speed GPS' property (m/s → km/h) since wheel
-    rotation data (HRot) is not reliably available via the reconstruction query.
-    For local CSV trips, speed is calculated from wheel rotations as before.
 
-    Braking detection notes by path:
-    - CSV path: requires hrot_diff >= MIN_HROT_FOR_BRAKING so that single-tick
-      segments (whose timing noise mimics large decelerations) are excluded.
-    - API path: hrot_diff is always 0 by design, so the hrot guard is not
-      applied; braking is detected from GPS speed changes instead.
+    Speed is calculated from wheel rotations (HRot) recorded in the local CSV.
+
+    Braking detection requires hrot_diff >= MIN_HROT_FOR_BRAKING so that
+    single-tick segments (whose timing noise mimics large decelerations) are
+    excluded.
     """
     try:
         with open(filepath, 'r') as f:
@@ -258,18 +247,13 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         if 'features' not in data:
             return None, None
         
-        # Determine data source for this trip
-        use_gps_speed = is_api_trip(trip_id, saved_metadata)
-        if use_gps_speed:
-            print(f"    🌐 API trip — using GPS speed instead of wheel rotation")
-
         # Step 1: Extract features and metadata
         features, file_metadata = extract_metadata_and_features(data)
         
         if not features:
             return None, file_metadata
         
-        # Get wheel diameter (still needed for API trips for metadata consistency)
+        # Get wheel diameter
         wheel_diameter_mm = get_wheel_diameter(trip_id, file_metadata, saved_metadata)
         wheel_circumference_m = (wheel_diameter_mm / 1000) * math.pi
         
@@ -296,7 +280,7 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
             print(f"    Found {len(features)} features")
             print(f"    Acceleration data points: {len(acc_y_data)}")
             print(f"    Metadata keys: {list(file_metadata.keys()) if file_metadata else 'None'}")
-            print(f"    Speed source: {'GPS (Speed GPS)' if use_gps_speed else 'Wheel rotation (HRot)'}")
+            print(f"    Speed source: Wheel rotation (HRot)")
             print(f"\n  DEBUG - Wheel configuration:")
             print(f"    Diameter: {wheel_diameter_mm}mm")
             print(f"    Circumference: {wheel_circumference_m:.3f}m")
@@ -322,10 +306,6 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
             samples_value = props.get('Samples', 0)
             samples_int = safe_int(samples_value, 0)
 
-            # Speed GPS is in m/s from the DB — convert to km/h here
-            raw_gps_speed = safe_float(props.get('Speed GPS'), 0.0)
-            gps_speed_kmh = raw_gps_speed * 3.6 if raw_gps_speed else 0.0
-            
             points.append({
                 'lon': float(lon),
                 'lat': float(lat),
@@ -337,7 +317,6 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                 'time_str': props.get('HH:mm:ss'),
                 'time_ms': props.get('SSS'),
                 'original_speed': props.get('Speed'),
-                'gps_speed_kmh': gps_speed_kmh,
                 'idx': idx
             })
         
@@ -390,59 +369,91 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         # Step 4: Create road quality lookup
         quality_lookup = map_road_quality_to_segments(points, road_quality_data)
         
-        # Step 5: Create line segments
+        # Step 5: Create line segments — wheel-rotation-based speed (local CSV).
+        # Braking requires hrot_diff >= MIN_HROT_FOR_BRAKING because a single
+        # half-rotation tick (hrot_diff=1) has too little timing resolution:
+        # the apparent speed swing between adjacent single-tick segments easily
+        # exceeds the braking threshold even at steady cruising speed.
         new_features = []
-        
-        if use_gps_speed:
-            # ── API path: one segment per consecutive point pair, GPS speed ──────
-            # hrot_diff is 0 for all API segments by design; braking is detected
-            # from GPS speed changes. The MIN_HROT_FOR_BRAKING guard is NOT applied
-            # here — it is a CSV-only safeguard against single-tick timing noise.
-            prev_speed_kmh = None
+        prev_speed_kmh = None
 
-            for i in range(len(points) - 1):
-                start_point = points[i]
-                end_point   = points[i + 1]
+        i = 0
+        while i < len(points) - 1:
+            start_point = points[i]
 
-                gps_distance = haversine_distance(
-                    start_point['lon'], start_point['lat'],
-                    end_point['lon'],   end_point['lat']
-                )
+            j = i + 1
+            while j < len(points) and points[j]['hrot'] == start_point['hrot']:
+                j += 1
 
-                # Skip GPS jumps — also marks a discontinuity in the speed series.
-                if gps_distance > 1000:
-                    prev_speed_kmh = None
-                    continue
+            if j >= len(points):
+                break
 
-                # Average GPS speed of the two endpoints, capped at 40 km/h
-                speed_kmh = (start_point['gps_speed_kmh'] + end_point['gps_speed_kmh']) / 2
-                speed_kmh = min(speed_kmh, 40)
+            end_point = points[j]
 
-                if start_point['lon'] == end_point['lon'] and start_point['lat'] == end_point['lat']:
-                    prev_speed_kmh = speed_kmh
-                    continue
-
-                midpoint_sample = (start_point['samples'] + end_point['samples']) // 2
-                road_quality = quality_lookup(midpoint_sample) if quality_lookup else 0
-
-                # Estimate time from sample count (API trips lack real wall-clock time)
+            if start_point['time'] and end_point['time']:
+                time_diff_seconds = (end_point['time'] - start_point['time']).total_seconds()
+            else:
                 sample_diff = end_point['samples'] - start_point['samples']
-                est_time_s  = sample_diff * SECONDS_PER_SAMPLE if sample_diff > 0 else None
+                time_diff_seconds = sample_diff * SECONDS_PER_SAMPLE
 
-                # Braking: guard against implausible speed jumps and bad time estimates.
-                braking_intensity = 0.0
-                if (
-                    prev_speed_kmh is not None
-                    and est_time_s is not None
-                    and est_time_s >= MIN_SEGMENT_TIME_S
-                    and abs(speed_kmh - prev_speed_kmh) <= SPEED_JUMP_THRESHOLD_KMH
-                ):
-                    braking_intensity = calculate_braking_intensity(
-                        prev_speed_kmh, speed_kmh, est_time_s
-                    )
-                elif prev_speed_kmh is not None and abs(speed_kmh - prev_speed_kmh) > SPEED_JUMP_THRESHOLD_KMH:
-                    # Speed jumped implausibly — treat as a discontinuity.
-                    prev_speed_kmh = None
+            if time_diff_seconds <= 0 or time_diff_seconds > 600:
+                i = j
+                continue
+
+            # Reject segments too short to yield a reliable deceleration estimate.
+            if time_diff_seconds < MIN_SEGMENT_TIME_S:
+                prev_speed_kmh = None
+                i = j
+                continue
+
+            hrot_diff = end_point['hrot'] - start_point['hrot']
+
+            if hrot_diff > 0 and time_diff_seconds > 0:
+                revolutions = hrot_diff / 2.0
+                distance_m = revolutions * wheel_circumference_m
+                speed_ms = distance_m / time_diff_seconds
+                speed_kmh = speed_ms * 3.6
+            else:
+                speed_kmh = 0
+
+            gps_distance = haversine_distance(
+                start_point['lon'], start_point['lat'],
+                end_point['lon'], end_point['lat']
+            )
+
+            # GPS jump — treat as a discontinuity in the speed series.
+            if gps_distance > 1000:
+                prev_speed_kmh = None
+                i = j
+                continue
+
+            if speed_kmh > 40:
+                speed_kmh = 40
+
+            midpoint_sample = (start_point['samples'] + end_point['samples']) // 2
+            road_quality = quality_lookup(midpoint_sample) if quality_lookup else 0
+
+            # Braking: only calculate when hrot_diff is large enough to give a
+            # reliable speed baseline, and when the speed change is plausible.
+            braking_intensity = 0.0
+            if prev_speed_kmh is not None and hrot_diff >= MIN_HROT_FOR_BRAKING:
+                if abs(speed_kmh - prev_speed_kmh) > SPEED_JUMP_THRESHOLD_KMH:
+                    # Implausible jump — reset series and skip this segment.
+                    prev_speed_kmh = speed_kmh
+                    i = j
+                    continue
+                braking_intensity = calculate_braking_intensity(
+                    prev_speed_kmh, speed_kmh, time_diff_seconds
+                )
+            elif prev_speed_kmh is not None and abs(speed_kmh - prev_speed_kmh) > SPEED_JUMP_THRESHOLD_KMH:
+                # hrot_diff too small AND speed jumped — reset to avoid poisoning
+                # the next comparison.
+                prev_speed_kmh = speed_kmh
+                i = j
+                continue
+
+            if (start_point['lon'] != end_point['lon'] or
+                start_point['lat'] != end_point['lat']) and speed_kmh < 100:
 
                 new_features.append({
                     'type': 'Feature',
@@ -450,7 +461,7 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                         'type': 'LineString',
                         'coordinates': [
                             [start_point['lon'], start_point['lat']],
-                            [end_point['lon'],   end_point['lat']]
+                            [end_point['lon'], end_point['lat']]
                         ]
                     },
                     'properties': {
@@ -458,9 +469,9 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                         'road_quality': road_quality,
                         'marker': start_point['marker'],
                         'trip_id': trip_id,
-                        'hrot_diff': 0,
-                        'sample_diff': sample_diff,
-                        'time_diff_s': round(est_time_s, 3) if est_time_s else None,
+                        'hrot_diff': hrot_diff,
+                        'sample_diff': end_point['samples'] - start_point['samples'],
+                        'time_diff_s': round(time_diff_seconds, 3),
                         'gps_distance_m': round(gps_distance, 1),
                         'original_speed': start_point['original_speed'],
                         'wheel_diameter_mm': wheel_diameter_mm,
@@ -470,125 +481,12 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                 })
 
                 prev_speed_kmh = speed_kmh
+            else:
+                # Segment skipped but still update rolling speed to avoid
+                # false braking signals across a gap.
+                prev_speed_kmh = speed_kmh
 
-        else:
-            # ── Local CSV path: wheel-rotation-based speed ───────────────────────
-            # Braking requires hrot_diff >= MIN_HROT_FOR_BRAKING because a single
-            # half-rotation tick (hrot_diff=1) has too little timing resolution:
-            # the apparent speed swing between adjacent single-tick segments easily
-            # exceeds the braking threshold even at steady cruising speed.
-            prev_speed_kmh = None
-
-            i = 0
-            while i < len(points) - 1:
-                start_point = points[i]
-                
-                j = i + 1
-                while j < len(points) and points[j]['hrot'] == start_point['hrot']:
-                    j += 1
-                
-                if j >= len(points):
-                    break
-                
-                end_point = points[j]
-                
-                if start_point['time'] and end_point['time']:
-                    time_diff_seconds = (end_point['time'] - start_point['time']).total_seconds()
-                else:
-                    sample_diff = end_point['samples'] - start_point['samples']
-                    time_diff_seconds = sample_diff * SECONDS_PER_SAMPLE
-                
-                if time_diff_seconds <= 0 or time_diff_seconds > 600:
-                    i = j
-                    continue
-
-                # Reject segments too short to yield a reliable deceleration estimate.
-                if time_diff_seconds < MIN_SEGMENT_TIME_S:
-                    prev_speed_kmh = None
-                    i = j
-                    continue
-                
-                hrot_diff = end_point['hrot'] - start_point['hrot']
-                
-                if hrot_diff > 0 and time_diff_seconds > 0:
-                    revolutions = hrot_diff / 2.0
-                    distance_m = revolutions * wheel_circumference_m
-                    speed_ms = distance_m / time_diff_seconds
-                    speed_kmh = speed_ms * 3.6
-                else:
-                    speed_kmh = 0
-                
-                gps_distance = haversine_distance(
-                    start_point['lon'], start_point['lat'], 
-                    end_point['lon'], end_point['lat']
-                )
-                
-                # GPS jump — treat as a discontinuity in the speed series.
-                if gps_distance > 1000:
-                    prev_speed_kmh = None
-                    i = j
-                    continue
-                
-                if speed_kmh > 40:
-                    speed_kmh = 40
-                
-                midpoint_sample = (start_point['samples'] + end_point['samples']) // 2
-                road_quality = quality_lookup(midpoint_sample) if quality_lookup else 0
-
-                # Braking: only calculate when hrot_diff is large enough to give a
-                # reliable speed baseline, and when the speed change is plausible.
-                braking_intensity = 0.0
-                if prev_speed_kmh is not None and hrot_diff >= MIN_HROT_FOR_BRAKING:
-                    if abs(speed_kmh - prev_speed_kmh) > SPEED_JUMP_THRESHOLD_KMH:
-                        # Implausible jump — reset series and skip this segment.
-                        prev_speed_kmh = speed_kmh
-                        i = j
-                        continue
-                    braking_intensity = calculate_braking_intensity(
-                        prev_speed_kmh, speed_kmh, time_diff_seconds
-                    )
-                elif prev_speed_kmh is not None and abs(speed_kmh - prev_speed_kmh) > SPEED_JUMP_THRESHOLD_KMH:
-                    # hrot_diff too small AND speed jumped — reset to avoid poisoning
-                    # the next comparison.
-                    prev_speed_kmh = speed_kmh
-                    i = j
-                    continue
-                
-                if (start_point['lon'] != end_point['lon'] or 
-                    start_point['lat'] != end_point['lat']) and speed_kmh < 100:
-                    
-                    new_features.append({
-                        'type': 'Feature',
-                        'geometry': {
-                            'type': 'LineString',
-                            'coordinates': [
-                                [start_point['lon'], start_point['lat']],
-                                [end_point['lon'], end_point['lat']]
-                            ]
-                        },
-                        'properties': {
-                            'Speed': round(speed_kmh, 1),
-                            'road_quality': road_quality,
-                            'marker': start_point['marker'],
-                            'trip_id': trip_id,
-                            'hrot_diff': hrot_diff,
-                            'sample_diff': end_point['samples'] - start_point['samples'],
-                            'time_diff_s': round(time_diff_seconds, 3),
-                            'gps_distance_m': round(gps_distance, 1),
-                            'original_speed': start_point['original_speed'],
-                            'wheel_diameter_mm': wheel_diameter_mm,
-                            'braking_intensity': braking_intensity,
-                            'is_braking': braking_intensity >= BRAKING_DECEL_THRESHOLD_KMH_S,
-                        }
-                    })
-
-                    prev_speed_kmh = speed_kmh
-                else:
-                    # Segment skipped but still update rolling speed to avoid
-                    # false braking signals across a gap.
-                    prev_speed_kmh = speed_kmh
-                
-                i = j
+            i = j
         
         if not new_features:
             return None, file_metadata

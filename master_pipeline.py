@@ -2,17 +2,15 @@
 """
 Master Pipeline for Reflector Ride Maps
 Runs the complete data processing workflow:
-1. (Optional) Fetch new trips from Supabase API
-2. CSV to GeoJSON conversion
-3. Speed calculation from sensor data
-4. Road segment averaging and consolidation
-5. Generate trips.geojson (merge local + Supabase)
-6. Generate braking hotspots
-7. Cleanup of processed CSV files
+1. CSV to GeoJSON conversion
+2. Speed calculation from sensor data
+3. Road segment averaging and consolidation
+4. Generate trips.geojson
+5. Generate braking hotspots
+6. Cleanup of processed CSV files
 
 Usage:
-  python master_pipeline.py          # local CSVs only
-  python master_pipeline.py --api    # fetch from Supabase first, then process
+  python master_pipeline.py
 """
 
 import subprocess
@@ -84,11 +82,9 @@ def run_command(command, description):
 # Prerequisites
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_python_packages(use_api):
+def check_python_packages():
     print_info("Checking Python packages…")
     required = ['numpy', 'geojson']
-    if use_api:
-        required.append('psycopg2')
 
     missing = []
     for pkg in required:
@@ -106,25 +102,21 @@ def check_python_packages(use_api):
     return True
 
 
-def check_prerequisites(use_api):
+def check_prerequisites():
     print_step("0", "Checking Prerequisites")
     issues = []
 
     csv_dir = Path("csv_data")
-    if not use_api:
-        if not csv_dir.exists():
-            issues.append("csv_data/ directory not found")
-            print_error("csv_data/ directory not found")
-        else:
-            csv_files = list(csv_dir.rglob("*.csv"))
-            if not csv_files:
-                issues.append("No CSV files found in csv_data/")
-                print_warning("No CSV files found in csv_data/")
-            else:
-                print_success(f"Found {len(csv_files)} CSV file(s) in csv_data/")
+    if not csv_dir.exists():
+        issues.append("csv_data/ directory not found")
+        print_error("csv_data/ directory not found")
     else:
-        csv_dir.mkdir(exist_ok=True)
-        print_info("csv_data/ will be populated by the Supabase fetch step.")
+        csv_files = list(csv_dir.rglob("*.csv"))
+        if not csv_files:
+            issues.append("No CSV files found in csv_data/")
+            print_warning("No CSV files found in csv_data/")
+        else:
+            print_success(f"Found {len(csv_files)} CSV file(s) in csv_data/")
 
     scripts = [
         "csv_to_geojson_converter.py",
@@ -196,7 +188,7 @@ def cleanup_csv_files():
 # Summary
 # ─────────────────────────────────────────────────────────────────────────────
 
-def print_summary(use_api):
+def print_summary():
     print_header("PIPELINE SUMMARY")
 
     csv_count               = count_files("csv_data", "*.csv")
@@ -206,16 +198,14 @@ def print_summary(use_api):
     trips_geojson_exists    = Path("trips.geojson").exists()
     braking_hotspots_exists = Path("braking_hotspots.json").exists()
 
-    # Metadata source breakdown
+    # Metadata count
     meta_file = Path("trips_metadata.json")
-    api_count, local_count = 0, 0
+    local_count = 0
     if meta_file.exists():
         try:
             meta = json.loads(meta_file.read_text())
             for v in meta.values():
-                if v.get("source") == "api":
-                    api_count += 1
-                elif v.get("source") == "local_csv":
+                if v.get("source") == "local_csv":
                     local_count += 1
         except Exception:
             pass
@@ -224,8 +214,7 @@ def print_summary(use_api):
     print(f"  📄 CSV files remaining: {csv_count}")
 
     print(f"\n{Colors.BOLD}Trip Metadata (all-time):{Colors.END}")
-    print(f"  🌐 Fetched via Supabase API : {api_count}")
-    print(f"  📄 Loaded from local CSV    : {local_count}")
+    print(f"  📄 Loaded from local CSV: {local_count}")
 
     print(f"\n{Colors.BOLD}Generated Files:{Colors.END}")
     print(f"  🗺️  Cleaned GeoJSON     : {geojson_clean_count}")
@@ -265,19 +254,16 @@ def print_summary(use_api):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    use_api = "--api" in sys.argv
-
     print_header("REFLECTOR RIDE MAPS - MASTER PIPELINE")
-    mode_label = "🌐 Supabase API + local CSVs" if use_api else "📄 Local CSVs only"
-    print(f"{Colors.BOLD}Mode: {mode_label}{Colors.END}\n")
+    print(f"{Colors.BOLD}Mode: 📄 Local CSVs only{Colors.END}\n")
 
     print_info(f"Python: {sys.executable} ({sys.version.split()[0]})\n")
 
-    if not check_python_packages(use_api):
+    if not check_python_packages():
         print_error("Required Python packages are missing — aborting.")
         sys.exit(1)
 
-    prereqs_ok, issues = check_prerequisites(use_api)
+    prereqs_ok, issues = check_prerequisites()
     if not prereqs_ok:
         print_error("Prerequisites check failed!")
         for issue in issues:
@@ -299,11 +285,9 @@ def main():
 
     total_start = time.time()
 
-    # ── Step 1: CSV → GeoJSON (with optional Supabase fetch built in) ─────────
-    print_step("1", "Converting CSV to GeoJSON" + (" (+ Supabase fetch)" if use_api else ""))
+    # ── Step 1: CSV → GeoJSON ──────────────────────────────────────────────────
+    print_step("1", "Converting CSV to GeoJSON")
     converter_cmd = [sys.executable, "csv_to_geojson_converter.py"]
-    if use_api:
-        converter_cmd.append("--api")
     step1_ok = run_command(converter_cmd, "CSV to GeoJSON conversion")
 
     if not step1_ok:
@@ -357,7 +341,7 @@ def main():
 
     total_elapsed = time.time() - total_start
     print(f"\n{Colors.BOLD}Total time: {total_elapsed:.2f}s{Colors.END}")
-    print_summary(use_api)
+    print_summary()
 
 
 if __name__ == "__main__":

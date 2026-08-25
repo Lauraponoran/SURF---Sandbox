@@ -2,8 +2,8 @@
 """
 road_segments_averaged.py
 
-Reads trips.geojson (which merges both local CSV trips and remote Supabase trips)
-and produces road_segments_averaged.json with averaged speed, road quality,
+Reads trips.geojson (built from local CSV trips) and produces
+road_segments_averaged.json with averaged speed, road quality,
 and composite scores per road segment.
 
 Run AFTER generate_trips_geojson.py:
@@ -109,7 +109,7 @@ def merge_segments(segments_list):
 
 def process_trips_geojson(input_file="trips.geojson"):
     """
-    Read trips.geojson (merged local + remote) and aggregate road segments.
+    Read trips.geojson (local CSV trips) and aggregate road segments.
     This replaces the old glob-based approach so all trips are included.
     """
     print(f"📂 Loading {input_file}…")
