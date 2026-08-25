@@ -1,4 +1,4 @@
-# 🚴 Reflector Ride Maps
+# Reflector Ride Maps
 
 A bike sensor data visualization tool that transforms GPS and accelerometer data into interactive route maps with speed coloring, road quality analysis, and braking event detection.
 
