@@ -865,15 +865,15 @@ function setupCrashLayer(geojson, labelLayerId) {
       'circle-blur': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        0.85,
-        1.0
+        0.55,
+        0.75
       ],
 
       'circle-opacity': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        0.65,
-        0.28
+        0.80,
+        0.40
       ],
 
       'circle-pitch-alignment': 'map'
@@ -916,9 +916,9 @@ function setupCrashLayer(geojson, labelLayerId) {
         'interpolate',
         ['linear'],
         ['zoom'],
-        10, 10,
-        14, 15,
-        17, 21
+        10, 15,
+        14, 22,
+        17, 30
       ],
       
       'text-allow-overlap': true,
@@ -934,8 +934,8 @@ function setupCrashLayer(geojson, labelLayerId) {
       'text-halo-width': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        2.5,
-        1.5
+        4,
+        2
       ],
 
       'text-opacity': 0.98
@@ -1244,39 +1244,86 @@ function updateStatsVisibility() {
   const statsEl = document.getElementById('stats');
   if (statsEl) statsEl.style.display = (window.innerWidth <= 768 && isFilteredMode()) ? 'none' : 'block';
   const sensorLegend = document.getElementById('sensorLegend');
-  if (sensorLegend) sensorLegend.style.display = isFilteredMode() ? 'none' : 'block';
+
+  if (sensorLegend) {
+    // Keep the sensor legend visible when crashes are active so
+    // both legends can sit side-by-side.
+    sensorLegend.style.display =
+      (isFilteredMode() && !showCrashes) ? 'none' : 'block';
+  }  
 }
 
 window.addEventListener('resize', updateStatsVisibility);
 
 function updateLegendPositions() {
-  // Sensors is pinned first (closest to the true screen edge) so it never
-  // drifts depending on which other legends happen to be open — everything
-  // else stacks relative to it, not the other way around.
-  const order         = ['averagedSegmentsLegend','speedLegend','roadQualityLegend','brakingLegend','crashLegend'];
-  const sensorLegend  = document.getElementById('sensorLegend');
-  const sensorVisible = sensorLegend && sensorLegend.style.display === 'block';
-  const others        = order.map(id => document.getElementById(id)).filter(el => el && el.style.display === 'block');
-  const mobile        = window.matchMedia('(max-width: 768px)').matches;
+  const order = [
+    'averagedSegmentsLegend',
+    'speedLegend',
+    'roadQualityLegend',
+    'brakingLegend',
+    'crashLegend'
+  ];
+
+  const sensorLegend = document.getElementById('sensorLegend');
+  const mobile = window.matchMedia('(max-width: 768px)').matches;
+
   updateStatsVisibility();
 
-  if (mobile) {
-    let b = 10;
-    if (sensorVisible) {
-      sensorLegend.style.right  = '10px';
-      sensorLegend.style.bottom = `${b}px`;
-      b += (sensorLegend.offsetHeight || 150) + 8;
+  const sensorVisible =
+    sensorLegend &&
+    getComputedStyle(sensorLegend).display !== 'none';
+
+  const others = order
+    .map(id => document.getElementById(id))
+    .filter(el => el && getComputedStyle(el).display !== 'none');
+
+  // Force the browser to finish layout before measuring dynamically
+  // rebuilt legends.
+  requestAnimationFrame(() => {
+
+    if (mobile) {
+      let bottom = 10;
+
+      if (sensorVisible) {
+        sensorLegend.style.right = '10px';
+        sensorLegend.style.bottom = `${bottom}px`;
+        sensorLegend.style.zIndex = '20';
+
+        bottom += sensorLegend.offsetHeight + 10;
+      }
+
+      others.forEach(el => {
+        el.style.right = '10px';
+        el.style.bottom = `${bottom}px`;
+        el.style.zIndex = '20';
+
+        bottom += el.offsetHeight + 10;
+      });
+
+      return;
     }
-    others.forEach(el => { el.style.right = '10px'; el.style.bottom = `${b}px`; b += (el.offsetHeight || 150) + 8; });
-  } else {
-    let r = 10;
+
+    // Desktop:
+    // Sensor legend sits closest to the right edge.
+    // Every active legend gets pushed to its left.
+    let right = 10;
+
     if (sensorVisible) {
+      sensorLegend.style.right = `${right}px`;
       sensorLegend.style.bottom = '10px';
-      sensorLegend.style.right  = `${r}px`;
-      r += (sensorLegend.offsetWidth || 220) + 10;
+      sensorLegend.style.zIndex = '20';
+
+      right += sensorLegend.offsetWidth + 12;
     }
-    others.forEach(el => { el.style.bottom = '10px'; el.style.right = `${r}px`; r += (el.offsetWidth || 220) + 10; });
-  }
+
+    others.forEach(el => {
+      el.style.right = `${right}px`;
+      el.style.bottom = '10px';
+      el.style.zIndex = '20';
+
+      right += el.offsetWidth + 12;
+    });
+  });
 }
 
 function setupAveragedSegmentControls() {
