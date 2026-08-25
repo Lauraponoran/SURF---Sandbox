@@ -736,6 +736,15 @@ function getCrashOutcomeExpression() {
 }
 
 function getCrashColorExpression() {
+  if (crashClassification === 'type') {
+    return getCrashTypeExpression();
+  }
+
+  if (crashClassification === 'outcome') {
+    return getCrashOutcomeExpression();
+  }
+
+  // Default = impact intensity
   return [
     'match', ['get', 'severity'],
     'Severe', '#ff1744',
