@@ -766,12 +766,12 @@ function setupCrashLayer(geojson, labelLayerId) {
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // CRASH HALO
+  // CRASH CIRCLE (id kept as 'crash-events-halo' for compatibility with
+  // existing visibility toggles elsewhere in the file)
   //
-  // A plain, fixed backdrop that just helps the glyph pop off the basemap —
-  // it no longer encodes anything on its own. Outcome is represented instead
-  // by a crisp stroke ring on this same layer: a sharp, un-blurred outline
-  // reads far more clearly at map scale than a blur/opacity difference did.
+  // Plain, solid, flat-filled circle — no blur/opacity trickery. Intensity
+  // (severity) is the fill colour. Outcome is a crisp white stroke ring:
+  // unresolved crashes get a solid white outline, resolved ones get none.
   // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-halo',
@@ -781,31 +781,26 @@ function setupCrashLayer(geojson, labelLayerId) {
       visibility: 'none'
     },
     paint: {
-      'circle-color': '#000000',
-      'circle-opacity': 0.35,
-      'circle-blur': 0.6,
+      // Intensity = fill colour (same channel the legend shows).
+      'circle-color': getCrashColorExpression(),
+      'circle-opacity': 0.9,
+      'circle-blur': 0,
 
       'circle-radius': [
         'interpolate',
         ['linear'],
         ['zoom'],
-        10, 12,
-        14, 18,
-        17, 26
+        10, 9,
+        14, 13,
+        17, 18
       ],
 
-      // Outcome = a bold stroke ring. Sharp edge, not blurred.
+      // Outcome = a plain white outline ring, unresolved only.
       'circle-stroke-color': '#ffffff',
       'circle-stroke-width': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
         3,
-        0
-      ],
-      'circle-stroke-opacity': [
-        'case',
-        ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        1,
         0
       ],
 
@@ -817,15 +812,14 @@ function setupCrashLayer(geojson, labelLayerId) {
   // ─────────────────────────────────────────────────────────────────────────
   // CRASH SYMBOL
   //
-  // Type is represented by shape:
+  // Type is represented by shape, drawn small and dark on top of the
+  // colour-coded circle (see above), so it reads as a glyph on a coloured
+  // chip rather than a second, competing colour channel:
   //
   //   Stationary Fall → ◆
   //   Low-Speed Fall  → ▲
   //   Moving Crash    → ●
   //   Unclassified    → ■
-  //
-  // Intensity still controls the colour. Halo width is now fixed — it no
-  // longer tries to double up as an outcome indicator (see the ring above).
   // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-dot',
@@ -850,9 +844,9 @@ function setupCrashLayer(geojson, labelLayerId) {
         'interpolate',
         ['linear'],
         ['zoom'],
-        10, 15,
-        14, 22,
-        17, 30
+        10, 9,
+        14, 13,
+        17, 18
       ],
       
       'text-allow-overlap': true,
@@ -860,11 +854,11 @@ function setupCrashLayer(geojson, labelLayerId) {
     },
 
     paint: {
-      // Intensity = colour
-      'text-color': getCrashColorExpression(),
+      // Fixed dark glyph — colour is already carried by the circle beneath it.
+      'text-color': '#1a1a1a',
 
-      'text-halo-color': '#000000',
-      'text-halo-width': 1.5,
+      'text-halo-color': 'rgba(255,255,255,0.35)',
+      'text-halo-width': 0.4,
 
       'text-opacity': 1
     }
@@ -1465,68 +1459,85 @@ function setupControls() {
   if (isoToggle) isoToggle.addEventListener('change', e => updateIsochrone(e.target.checked));
 }
 
+// Crash / fall legend — three dimensions (intensity / classification /
+// outcome), each shown as a collapsible category. Tap a category to reveal
+// its sub-labels; only the relevant one needs to be open at a time, which
+// keeps the panel short instead of listing all three dimensions at once.
+const CRASH_LEGEND_CATEGORIES = [
+  {
+    id: 'intensity',
+    label: 'Intensity',
+    hint: 'Circle colour = impact severity',
+    rows: [
+      { swatch: `<div class="cl-swatch" style="background:#ffea00;"></div>`, label: 'Minor' },
+      { swatch: `<div class="cl-swatch" style="background:#ff9100;"></div>`, label: 'Hard' },
+      { swatch: `<div class="cl-swatch" style="background:#ff1744;"></div>`, label: 'Severe' },
+    ]
+  },
+  {
+    id: 'classification',
+    label: 'Classification',
+    hint: 'Symbol shape = type of event',
+    rows: [
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">◆</div>`, label: 'Stationary Fall' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">▲</div>`, label: 'Low-Speed Fall' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">●</div>`, label: 'Moving Crash' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">■</div>`, label: 'Unclassified' },
+    ]
+  },
+  {
+    id: 'outcome',
+    label: 'Outcome',
+    hint: 'White ring = rider did not recover',
+    rows: [
+      { swatch: `<div class="cl-swatch cl-swatch--outcome"></div>`, label: 'Resolved' },
+      { swatch: `<div class="cl-swatch cl-swatch--outcome unresolved"></div>`, label: 'Unresolved (white ring)' },
+    ]
+  },
+];
+
 function renderCrashLegend() {
   const legend = document.getElementById('crashLegend');
   if (!legend) return;
 
-  // Static content — three dimensions, three dedicated channels, all shown
-  // at once. Nothing here toggles or remaps, so this only needs to run once.
   legend.innerHTML = `
     <strong>CRASHES &amp; FALLS</strong>
-
-    <p style="margin:6px 0 8px; font-size:0.75rem; opacity:0.8;">
-      All three dimensions are shown simultaneously:
-    </p>
-
-    <div class="speed-legend-item">
-      <div class="speed-color-box" style="background:#ffea00;"></div>
-      <span><strong>Colour</strong> = Minor</span>
-    </div>
-
-    <div class="speed-legend-item">
-      <div class="speed-color-box" style="background:#ff9100;"></div>
-      <span><strong>Colour</strong> = Hard</span>
-    </div>
-
-    <div class="speed-legend-item">
-      <div class="speed-color-box" style="background:#ff1744;"></div>
-      <span><strong>Colour</strong> = Severe</span>
-    </div>
-
-    <div style="margin-top:8px;">
-      <div class="speed-legend-item">
-        <span style="font-size:16px; width:20px; text-align:center;">◆</span>
-        <span><strong>◆</strong> Stationary Fall</span>
+    <p class="cl-sub">Tap a category to see what its colours &amp; symbols mean.</p>
+    ${CRASH_LEGEND_CATEGORIES.map((cat, i) => `
+      <button type="button" class="cl-cat" data-cat="${cat.id}" aria-expanded="${i === 0}">
+        <span class="cl-cat-dot"></span>
+        <span class="cl-cat-name">${cat.label}</span>
+        <span class="cl-chevron">▶</span>
+      </button>
+      <div class="cl-panel" data-panel="${cat.id}" data-open="${i === 0}">
+        <p class="cl-sub" style="margin:0 0 6px;">${cat.hint}</p>
+        ${cat.rows.map(r => `
+          <div class="cl-row">
+            ${r.swatch}
+            <span class="cl-row-label">${r.label}</span>
+          </div>
+        `).join('')}
       </div>
-
-      <div class="speed-legend-item">
-        <span style="font-size:16px; width:20px; text-align:center;">▲</span>
-        <span><strong>▲</strong> Low-Speed Fall</span>
-      </div>
-
-      <div class="speed-legend-item">
-        <span style="font-size:16px; width:20px; text-align:center;">●</span>
-        <span><strong>●</strong> Moving Crash</span>
-      </div>
-
-      <div class="speed-legend-item">
-        <span style="font-size:16px; width:20px; text-align:center;">■</span>
-        <span><strong>■</strong> Unclassified</span>
-      </div>
-    </div>
-
-    <div style="margin-top:8px;">
-      <div class="speed-legend-item">
-        <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,0.35);"></span>
-        <span>Resolved</span>
-      </div>
-
-      <div class="speed-legend-item">
-        <span style="display:inline-block;width:16px;height:16px;border-radius:50%;background:rgba(0,0,0,0.35);border:3px solid #fff;"></span>
-        <span>Unresolved (white ring)</span>
-      </div>
-    </div>
+    `).join('')}
   `;
+
+  // Accordion behaviour: opening one category closes the others so the
+  // panel stays short rather than growing with every click.
+  legend.querySelectorAll('.cl-cat').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const catId = btn.dataset.cat;
+      const isOpen = btn.getAttribute('aria-expanded') === 'true';
+
+      legend.querySelectorAll('.cl-cat').forEach(b => b.setAttribute('aria-expanded', 'false'));
+      legend.querySelectorAll('.cl-panel').forEach(p => p.setAttribute('data-open', 'false'));
+
+      if (!isOpen) {
+        btn.setAttribute('aria-expanded', 'true');
+        const panel = legend.querySelector(`.cl-panel[data-panel="${catId}"]`);
+        if (panel) panel.setAttribute('data-open', 'true');
+      }
+    });
+  });
 }
 
 function updateStatsFromMetadata() {
