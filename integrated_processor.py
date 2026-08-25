@@ -39,12 +39,13 @@ MIN_HROT_FOR_BRAKING = 2
 #
 # A candidate impact becomes a confirmed crash when:
 #   1. |Acc Y| spikes above CRASH_IMPACT_G, AND
-#   2. the accelerometer goes still afterward (std below CRASH_SETTLE_G over
-#      the next CRASH_SETTLE_WINDOW_SAMPLES) — this is what actually
-#      distinguishes a fall (bike/sensor stops moving) from a bump or hard
-#      brake (bike keeps moving/vibrating), independent of speed.
-# GPS speed, when available, is used only as corroboration afterward (the
-# bike shouldn't still be visibly cruising) — never as a precondition.
+#   2. the accelerometer settles afterward (std below CRASH_SETTLE_G over
+#      the next CRASH_SETTLE_WINDOW_SAMPLES), AND
+#   3. the wheel remains stopped for at least CRASH_MIN_STOP_GAP_SAMPLES.
+#
+# GPS speed, when available, is used as additional corroboration that the
+# bike is no longer cruising. A wheel stop shorter than the required
+# duration is treated as a jolt rather than a confirmed fall.
 CRASH_IMPACT_G = 6.0                # |Acc Y| spike that counts as a possible impact
 CRASH_SETTLE_G = 1.5                # post-impact Acc Y std must drop below this
 CRASH_SETTLE_WINDOW_SAMPLES = 100   # 2.0s at SAMPLE_RATE_HZ=50
