@@ -920,11 +920,7 @@ function setupCrashLayer(geojson, labelLayerId) {
         14, 15,
         17, 21
       ],
-
-      'text-font': [
-        'Arial Unicode MS Regular'
-      ],
-
+      
       'text-allow-overlap': true,
       'text-ignore-placement': true
     },
