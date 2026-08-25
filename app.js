@@ -938,7 +938,7 @@ function setupCrashLayer(geojson, labelLayerId) {
         2
       ],
 
-      'text-opacity': 0.98
+      'text-opacity': 1
     }
   }, labelLayerId);
 
@@ -1256,6 +1256,9 @@ function updateStatsVisibility() {
 window.addEventListener('resize', updateStatsVisibility);
 
 function updateLegendPositions() {
+  // First update visibility so we measure the actual current state.
+  updateStatsVisibility();
+
   const order = [
     'averagedSegmentsLegend',
     'speedLegend',
@@ -1267,8 +1270,7 @@ function updateLegendPositions() {
   const sensorLegend = document.getElementById('sensorLegend');
   const mobile = window.matchMedia('(max-width: 768px)').matches;
 
-  updateStatsVisibility();
-
+  // Use computed display rather than inline style.display.
   const sensorVisible =
     sensorLegend &&
     getComputedStyle(sensorLegend).display !== 'none';
@@ -1277,53 +1279,38 @@ function updateLegendPositions() {
     .map(id => document.getElementById(id))
     .filter(el => el && getComputedStyle(el).display !== 'none');
 
-  // Force the browser to finish layout before measuring dynamically
-  // rebuilt legends.
-  requestAnimationFrame(() => {
-
-    if (mobile) {
-      let bottom = 10;
-
-      if (sensorVisible) {
-        sensorLegend.style.right = '10px';
-        sensorLegend.style.bottom = `${bottom}px`;
-        sensorLegend.style.zIndex = '20';
-
-        bottom += sensorLegend.offsetHeight + 10;
-      }
-
-      others.forEach(el => {
-        el.style.right = '10px';
-        el.style.bottom = `${bottom}px`;
-        el.style.zIndex = '20';
-
-        bottom += el.offsetHeight + 10;
-      });
-
-      return;
-    }
-
-    // Desktop:
-    // Sensor legend sits closest to the right edge.
-    // Every active legend gets pushed to its left.
-    let right = 10;
+  if (mobile) {
+    let b = 10;
 
     if (sensorVisible) {
-      sensorLegend.style.right = `${right}px`;
-      sensorLegend.style.bottom = '10px';
-      sensorLegend.style.zIndex = '20';
-
-      right += sensorLegend.offsetWidth + 12;
+      sensorLegend.style.right = '10px';
+      sensorLegend.style.bottom = `${b}px`;
+      b += (sensorLegend.offsetHeight || 150) + 8;
     }
 
     others.forEach(el => {
-      el.style.right = `${right}px`;
-      el.style.bottom = '10px';
-      el.style.zIndex = '20';
-
-      right += el.offsetWidth + 12;
+      el.style.right = '10px';
+      el.style.bottom = `${b}px`;
+      b += (el.offsetHeight || 150) + 8;
     });
-  });
+
+  } else {
+    // Sensors stays closest to the right edge.
+    let r = 10;
+
+    if (sensorVisible) {
+      sensorLegend.style.bottom = '10px';
+      sensorLegend.style.right = `${r}px`;
+      r += (sensorLegend.offsetWidth || 220) + 10;
+    }
+
+    // Every other visible legend is placed immediately to its left.
+    others.forEach(el => {
+      el.style.bottom = '10px';
+      el.style.right = `${r}px`;
+      r += (el.offsetWidth || 220) + 10;
+    });
+  }
 }
 
 function setupAveragedSegmentControls() {
