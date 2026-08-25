@@ -152,8 +152,8 @@ function buildTripDateMap(features) {
 }
 
 // Returns the raw date/timestamp value for a trip, or null if unknown.
-// Prefers the per-feature "timestamp" property (from trips.geojson); falls
-// back to the "Trip start/end" metadata field for trips that predate it.
+// Prefers the per-feature "timestamp" property (from trips.geojson);
+// falls back to the "Trip start/end" metadata field for trips that predate it.
 function getTripDate(tripId) {
   if (tripDateMap[tripId]) return tripDateMap[tripId];
   const meta = tripsMetadata?.[tripId];
@@ -287,7 +287,7 @@ function formatDuration(s) {
 }
 
 function updateResetButtonVisibility() {
-  const active = showSpeedColors || showRoadQuality || showAveragedSegments || showBraking || searchActive || !!selectedTrip;
+  const active = showSpeedColors || showRoadQuality || showAveragedSegments || showBraking || showCrashes || searchActive || !!selectedTrip;
   document.getElementById('resetButton').style.display = active ? 'block' : 'none';
 }
 
@@ -315,12 +315,14 @@ function applyTripFilter(filterTripId) {
     } else {
       highlightColor = '#FF69B4';
     }
+
     map.setPaintProperty('trips-layer', 'line-color', [
       'case',
       ['==', ['get', 'trip_id'], filterTripId],
       highlightColor,
       'rgba(0,0,0,0)'
     ]);
+
     map.setPaintProperty('trips-layer', 'line-opacity', 1);
     map.setPaintProperty('trips-layer', 'line-width', [
       'case', ['==', ['get', 'trip_id'], filterTripId], 4, 0
@@ -355,6 +357,7 @@ function applyGroupFilter(matchingIds) {
     highlightColor,
     'rgba(0,0,0,0)'
   ]);
+
   map.setPaintProperty('trips-layer', 'line-opacity', 1);
   map.setPaintProperty('trips-layer', 'line-width', [
     'case', ['in', ['get', 'trip_id'], ['literal', [...set]]], 4, 0
@@ -370,6 +373,7 @@ function resetSelection() {
   showRoadQuality      = false;
   showAveragedSegments = false;
   showBraking          = false;
+  showCrashes          = false;
 
   if (currentPopup) { currentPopup.remove(); currentPopup = null; }
   applyTripFilter(null);
@@ -398,6 +402,9 @@ function resetSelection() {
   if (map.getLayer('crash-events-halo'))
     map.setLayoutProperty('crash-events-halo', 'visibility', 'none');
   if (map.getLayer('crash-events-dot'))
+    map.setLayoutProperty('crash-events-dot', 'visibility', 'none');
+
+    if (map.getLayer('crash-events-dot'))
     map.setLayoutProperty('crash-events-dot', 'visibility', 'none');
 
   if (map.getLayer('trips-layer')) {
@@ -703,8 +710,14 @@ function getCrashColorExpression() {
 }
 
 function buildCrashFeatures(features) {
-  const crashFeatures = (features || []).filter(f => f.properties.event_type === 'crash');
-  console.log(`🚨 Found ${crashFeatures.length} crash/fall event(s)`);
+  const crashFeatures = (features || []).filter(f =>
+    f?.geometry?.type === 'Point' &&
+    f?.properties?.event_type === 'crash'
+  );
+  console.log(`🚨 Found ${crashFeatures.length} crash marker(s)`);
+  if (crashFeatures.length > 0) {
+    console.log('🚨 Crash markers:', crashFeatures);
+  }
   return { type: 'FeatureCollection', features: crashFeatures };
 }
 
@@ -721,12 +734,17 @@ function setupCrashLayer(geojson, labelLayerId) {
     paint: {
       'circle-color': getCrashColorExpression(),
       'circle-radius': [
-        'case', ['get', 'unresolved'],
-        ['interpolate', ['linear'], ['zoom'], 10, 22, 14, 34, 17, 48],
-        ['interpolate', ['linear'], ['zoom'], 10, 14, 14, 22, 17, 32],
+        'interpolate', ['linear'], ['zoom'],
+        10, 14,
+        14, 22,
+        17, 32,
       ],
       'circle-blur':            1.0,
-      'circle-opacity':         0.4,
+      'circle-opacity': [
+        'case', ['get', 'unresolved'],
+        0.6,
+        0.35,
+      ],
       'circle-pitch-alignment': 'map',
     },
   }, labelLayerId);
@@ -786,7 +804,8 @@ function setupCrashControls() {
 
   cb.addEventListener('change', (e) => {
     showCrashes = e.target.checked;
-    const legend     = document.getElementById('crashLegend');
+
+      const legend     = document.getElementById('crashLegend');
     const visibility = showCrashes ? 'visible' : 'none';
 
     if (map.getLayer('crash-events-halo')) map.setLayoutProperty('crash-events-halo', 'visibility', visibility);
@@ -970,7 +989,7 @@ map.on('load', async () => {
 });
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
-function isFilteredMode() { return showSpeedColors || showRoadQuality || showAveragedSegments || showBraking || searchActive; }
+function isFilteredMode() { return showSpeedColors || showRoadQuality || showAveragedSegments || showBraking || showCrashes || searchActive; }
 
 function updateStatsVisibility() {
   const statsEl = document.getElementById('stats');
@@ -1186,7 +1205,8 @@ function setupControls() {
   if (speedCb) {
     speedCb.addEventListener('change', e => {
       showSpeedColors = e.target.checked;
-      if (showSpeedColors && showRoadQuality) {
+
+        if (showSpeedColors && showRoadQuality) {
         showRoadQuality = false;
         document.getElementById('roadQualityCheckbox').checked     = false;
         document.getElementById('roadQualityLegend').style.display = 'none';
