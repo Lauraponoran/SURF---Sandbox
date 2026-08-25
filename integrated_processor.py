@@ -31,6 +31,26 @@ MIN_SEGMENT_TIME_S = SECONDS_PER_SAMPLE  # 0.02 s
 # produces large apparent speed swings that are not real braking events.
 MIN_HROT_FOR_BRAKING = 2
 
+# ─── Crash / fall detection ──────────────────────────────────────────────────
+# Deliberately does NOT require the bike to have been moving at speed before
+# the impact. A parked bike knocked over, or a bike walked at low speed, is
+# just as much a crash as one that happens mid-ride — and low/near-zero-speed
+# conditions never show a "moving -> stopped" transition to key off of.
+#
+# A candidate impact becomes a confirmed crash when:
+#   1. |Acc Y| spikes above CRASH_IMPACT_G, AND
+#   2. the accelerometer goes still afterward (std below CRASH_SETTLE_G over
+#      the next CRASH_SETTLE_WINDOW_SAMPLES) — this is what actually
+#      distinguishes a fall (bike/sensor stops moving) from a bump or hard
+#      brake (bike keeps moving/vibrating), independent of speed.
+# GPS speed, when available, is used only as corroboration afterward (the
+# bike shouldn't still be visibly cruising) — never as a precondition.
+CRASH_IMPACT_G = 4.0                # |Acc Y| spike that counts as a possible impact
+CRASH_SETTLE_G = 1.5                # post-impact Acc Y std must drop below this
+CRASH_SETTLE_WINDOW_SAMPLES = 80    # ~1.6s at SAMPLE_RATE_HZ=50
+CRASH_MIN_GAP_SAMPLES = 150         # ~3s of quiet needed to split two impacts into separate events
+CRASH_SPEED_CONFIRM_KMH = 6.0       # forward-filled GPS speed must stay at/under this after impact
+
 # ─── Display-only smoothing ──────────────────────────────────────────────────
 # Raw wheel-rotation speed is segment-by-segment (irregular hrot tick spacing),
 # so consecutive segments can still show visible speed jitter on the map even
@@ -200,6 +220,94 @@ def extract_acceleration_data(features):
     
     return np.array(acc_y_values)
 
+def extract_gps_speed_data(features):
+    """Extract GPS speed (km/h) per feature, in the same order as
+    extract_acceleration_data. GPS updates far less often than the
+    accelerometer samples, so most entries are NaN — that's expected and
+    handled (forward-filled) by detect_crash_events, not resolved here."""
+    speed_values = []
+    for feature in features:
+        props = feature.get('properties', {})
+        raw = props.get('Speed GPS')
+        if raw is None or raw == '':
+            speed_values.append(np.nan)
+        else:
+            try:
+                speed_values.append(float(raw))
+            except (ValueError, TypeError):
+                speed_values.append(np.nan)
+    return np.array(speed_values, dtype=float)
+
+def _forward_fill(arr):
+    """Simple forward-fill for a 1D numpy array with NaNs."""
+    out = arr.copy()
+    last = np.nan
+    for i in range(len(out)):
+        if np.isnan(out[i]):
+            out[i] = last
+        else:
+            last = out[i]
+    return out
+
+def detect_crash_events(acc_y_data, speed_gps_data=None,
+                         impact_g=CRASH_IMPACT_G,
+                         settle_g=CRASH_SETTLE_G,
+                         settle_window=CRASH_SETTLE_WINDOW_SAMPLES,
+                         min_gap=CRASH_MIN_GAP_SAMPLES,
+                         speed_confirm_kmh=CRASH_SPEED_CONFIRM_KMH):
+    """
+    Detect crash/fall events from raw per-sample Acc Y (before segmenting
+    into wheel-rotation line segments, so the full ~50Hz resolution is used).
+
+    Returns a list of dicts with start_idx/end_idx into acc_y_data, peak_g,
+    and is_crash. See module-level comment above CRASH_IMPACT_G for the
+    reasoning — this intentionally does not gate on pre-impact speed.
+    """
+    n = len(acc_y_data)
+    flagged = np.where(np.abs(acc_y_data) >= impact_g)[0]
+    if len(flagged) == 0:
+        return []
+
+    # Cluster nearby flagged samples into single impact events
+    events = []
+    start = flagged[0]
+    prev = flagged[0]
+    for i in flagged[1:]:
+        if i - prev > min_gap:
+            events.append((start, prev))
+            start = i
+        prev = i
+    events.append((start, prev))
+
+    speed_ffill = _forward_fill(speed_gps_data) if speed_gps_data is not None else None
+
+    results = []
+    for s, e in events:
+        seg = acc_y_data[s:e + 1]
+        peak_idx = s + int(np.argmax(np.abs(seg)))
+        peak_g = float(acc_y_data[peak_idx])
+
+        post_lo, post_hi = e + 1, min(n, e + 1 + settle_window)
+        post = acc_y_data[post_lo:post_hi]
+        settled = len(post) > 0 and np.nanstd(post) < settle_g
+
+        if speed_ffill is not None:
+            post_speed = speed_ffill[post_lo:post_hi]
+            valid = post_speed[~np.isnan(post_speed)]
+            speed_ok = len(valid) == 0 or (valid <= speed_confirm_kmh).mean() >= 0.7
+        else:
+            speed_ok = True
+
+        results.append({
+            'start_idx': int(s),
+            'end_idx': int(e),
+            'peak_g': round(peak_g, 2),
+            'settled': bool(settled),
+            'speed_low_after': bool(speed_ok),
+            'is_crash': bool(settled and speed_ok),
+        })
+    return results
+
 def map_road_quality_to_segments(points, road_quality_data):
     """Map road quality scores to segments based on sample indices."""
     if road_quality_data is None:
@@ -300,7 +408,23 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         # Step 2: Extract acceleration data and calculate road quality
         print(f"    🛣️  Calculating road quality...")
         acc_y_data = extract_acceleration_data(features)
-        
+
+        # Crash/fall detection runs on raw per-sample data (before trimming
+        # and before segmenting into wheel-rotation line segments) so it has
+        # full accelerometer resolution to work with.
+        gps_speed_data = extract_gps_speed_data(features)
+        samples_seq = [safe_int(f.get('properties', {}).get('Samples', 0), 0) for f in features]
+        crash_events_raw = detect_crash_events(acc_y_data, gps_speed_data)
+        confirmed_crashes = [e for e in crash_events_raw if e['is_crash']]
+        if confirmed_crashes:
+            print(f"    🚨 Crash/fall events detected: {len(confirmed_crashes)}")
+        # Map each confirmed crash from feature-index space to sample-number
+        # space so it survives the point trimming/reordering below.
+        crash_sample_ranges = [
+            (samples_seq[e['start_idx']], samples_seq[e['end_idx']], e['peak_g'])
+            for e in confirmed_crashes
+        ]
+
         road_quality_data = None
         if len(acc_y_data) > 200:
             try:
@@ -517,6 +641,10 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                         'wheel_diameter_mm': wheel_diameter_mm,
                         'braking_intensity': braking_intensity,
                         'is_braking': braking_intensity >= BRAKING_DECEL_THRESHOLD_KMH_S,
+                        'is_crash': False,
+                        'crash_intensity_g': 0.0,
+                        'segment_start_sample': start_point['samples'],
+                        'segment_end_sample': end_point['samples'],
                     }
                 })
 
@@ -547,7 +675,25 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         braking_count = sum(1 for f in new_features if f['properties'].get('is_braking'))
         if braking_count:
             print(f"    🛑 Braking events detected: {braking_count}")
-        
+
+        # Tag the output segment(s) whose sample range overlaps each
+        # confirmed crash. A crash can span more than one short segment
+        # (or fall in a gap between them), so mark every overlapping one.
+        tagged_crashes = 0
+        for crash_start, crash_end, peak_g in crash_sample_ranges:
+            hit = False
+            for feat in new_features:
+                seg_start = feat['properties']['segment_start_sample']
+                seg_end = feat['properties']['segment_end_sample']
+                if seg_start <= crash_end and seg_end >= crash_start:
+                    feat['properties']['is_crash'] = True
+                    feat['properties']['crash_intensity_g'] = peak_g
+                    hit = True
+            if hit:
+                tagged_crashes += 1
+        if tagged_crashes:
+            print(f"    🚨 Crash events mapped onto {tagged_crashes} output segment(s)")
+
         return {'type': 'FeatureCollection', 'features': new_features}, file_metadata
     
     except Exception as e:
