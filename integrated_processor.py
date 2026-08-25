@@ -51,6 +51,17 @@ CRASH_SETTLE_WINDOW_SAMPLES = 80    # ~1.6s at SAMPLE_RATE_HZ=50
 CRASH_MIN_GAP_SAMPLES = 150         # ~3s of quiet needed to split two impacts into separate events
 CRASH_SPEED_CONFIRM_KMH = 6.0       # forward-filled GPS speed must stay at/under this after impact
 
+# Severity buckets for the map legend (Minor / Hard / Severe), by peak |Acc Y| in g.
+CRASH_SEVERITY_MINOR_MAX_G = 6.0    # < this -> Minor
+CRASH_SEVERITY_HARD_MAX_G = 10.0    # < this -> Hard, else Severe
+
+# "Did the bike stop, and did it move again?" — read from raw wheel-rotation
+# ticks after the impact, independent of the accelerometer settle check above.
+CRASH_RESUME_HROT_TICKS = 4         # ticks of wheel rotation that count as "moving again"
+CRASH_MIN_STOP_GAP_SAMPLES = 25     # ~0.5s of no rotation required to call it a real stop
+                                     # (a shorter gap means the wheel barely paused — treat as
+                                     # having kept moving through the impact, not a stop/fall)
+
 # ─── Display-only smoothing ──────────────────────────────────────────────────
 # Raw wheel-rotation speed is segment-by-segment (irregular hrot tick spacing),
 # so consecutive segments can still show visible speed jitter on the map even
@@ -238,6 +249,56 @@ def extract_gps_speed_data(features):
                 speed_values.append(np.nan)
     return np.array(speed_values, dtype=float)
 
+def extract_hrot_data(features):
+    """Extract raw HRot Count per feature, in the same order as
+    extract_acceleration_data. Used to detect whether the wheel starts
+    turning again after a crash (and how long that took), independent of
+    the accelerometer settle check."""
+    hrot_values = []
+    for feature in features:
+        props = feature.get('properties', {})
+        hrot_values.append(safe_int(props.get('HRot Count'), 0))
+    return np.array(hrot_values, dtype=int)
+
+def classify_crash_severity(peak_g):
+    """Bucket a crash's peak |Acc Y| into the map legend's severity labels."""
+    mag = abs(peak_g)
+    if mag < CRASH_SEVERITY_MINOR_MAX_G:
+        return 'Minor'
+    if mag < CRASH_SEVERITY_HARD_MAX_G:
+        return 'Hard'
+    return 'Severe'
+
+def analyze_crash_recovery(hrot_data, end_idx):
+    """
+    Look forward from the end of a crash's impact burst to see whether the
+    wheel starts turning again, and how long that took.
+
+    Returns (came_to_stop, recovery_time_s, unresolved):
+      - unresolved=True    the wheel never turns again for the rest of the
+                            trip's recorded data — flagged distinctly in the
+                            UI since it may mean the rider never got back on.
+      - came_to_stop=True  the wheel paused for a real gap (>= CRASH_MIN_STOP_GAP_SAMPLES)
+                            before resuming; recovery_time_s is that gap.
+      - came_to_stop=False the wheel kept turning almost immediately — the
+                            bike didn't really stop, this was a jolt, not a fall.
+    """
+    n = len(hrot_data)
+    baseline = hrot_data[end_idx]
+    resume_idx = None
+    for idx in range(end_idx + 1, n):
+        if hrot_data[idx] - baseline >= CRASH_RESUME_HROT_TICKS:
+            resume_idx = idx
+            break
+
+    if resume_idx is None:
+        return False, None, True
+
+    gap = resume_idx - end_idx
+    if gap >= CRASH_MIN_STOP_GAP_SAMPLES:
+        return True, round(gap / SAMPLE_RATE_HZ, 1), False
+    return False, None, False
+
 def _forward_fill(arr):
     """Simple forward-fill for a 1D numpy array with NaNs."""
     out = arr.copy()
@@ -301,6 +362,7 @@ def detect_crash_events(acc_y_data, speed_gps_data=None,
         results.append({
             'start_idx': int(s),
             'end_idx': int(e),
+            'peak_idx': int(peak_idx),
             'peak_g': round(peak_g, 2),
             'settled': bool(settled),
             'speed_low_after': bool(speed_ok),
@@ -413,17 +475,29 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         # and before segmenting into wheel-rotation line segments) so it has
         # full accelerometer resolution to work with.
         gps_speed_data = extract_gps_speed_data(features)
+        hrot_raw_data = extract_hrot_data(features)
         samples_seq = [safe_int(f.get('properties', {}).get('Samples', 0), 0) for f in features]
         crash_events_raw = detect_crash_events(acc_y_data, gps_speed_data)
         confirmed_crashes = [e for e in crash_events_raw if e['is_crash']]
         if confirmed_crashes:
             print(f"    🚨 Crash/fall events detected: {len(confirmed_crashes)}")
-        # Map each confirmed crash from feature-index space to sample-number
-        # space so it survives the point trimming/reordering below.
-        crash_sample_ranges = [
-            (samples_seq[e['start_idx']], samples_seq[e['end_idx']], e['peak_g'])
-            for e in confirmed_crashes
-        ]
+        # Enrich each confirmed crash with onset timing and recovery info while
+        # we still have full-resolution, pre-trim raw arrays to look at.
+        crash_events_enriched = []
+        for e in confirmed_crashes:
+            suddenness_s = round((e['peak_idx'] - e['start_idx']) / SAMPLE_RATE_HZ, 2)
+            came_to_stop, recovery_time_s, unresolved = analyze_crash_recovery(hrot_raw_data, e['end_idx'])
+            crash_events_enriched.append({
+                'sample_start': samples_seq[e['start_idx']],
+                'sample_end': samples_seq[e['end_idx']],
+                'peak_g': e['peak_g'],
+                'severity': classify_crash_severity(e['peak_g']),
+                'suddenness_s': suddenness_s,
+                'came_to_stop': came_to_stop,
+                'recovery_time_s': recovery_time_s,
+                'unresolved': unresolved,
+            })
+        crash_sample_ranges = crash_events_enriched
 
         road_quality_data = None
         if len(acc_y_data) > 200:
@@ -645,6 +719,7 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                         'crash_intensity_g': 0.0,
                         'segment_start_sample': start_point['samples'],
                         'segment_end_sample': end_point['samples'],
+                        'time_str': start_point['time_str'],
                     }
                 })
 
@@ -677,24 +752,48 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
             print(f"    🛑 Braking events detected: {braking_count}")
 
         # Tag the output segment(s) whose sample range overlaps each
-        # confirmed crash. A crash can span more than one short segment
-        # (or fall in a gap between them), so mark every overlapping one.
+        # confirmed crash, and emit a standalone Point feature per crash for
+        # the map's crash-events layer (event_type='crash') — a crash can
+        # span more than one short segment (or fall in a gap between them),
+        # so mark every overlapping one but only emit one marker per crash,
+        # anchored at the first matching segment's location.
+        crash_point_features = []
         tagged_crashes = 0
-        for crash_start, crash_end, peak_g in crash_sample_ranges:
-            hit = False
+        for crash in crash_sample_ranges:
+            crash_start, crash_end = crash['sample_start'], crash['sample_end']
+            anchor_feat = None
             for feat in new_features:
                 seg_start = feat['properties']['segment_start_sample']
                 seg_end = feat['properties']['segment_end_sample']
                 if seg_start <= crash_end and seg_end >= crash_start:
                     feat['properties']['is_crash'] = True
-                    feat['properties']['crash_intensity_g'] = peak_g
-                    hit = True
-            if hit:
+                    feat['properties']['crash_intensity_g'] = crash['peak_g']
+                    if anchor_feat is None:
+                        anchor_feat = feat
+            if anchor_feat is not None:
                 tagged_crashes += 1
+                anchor_coords = anchor_feat['geometry']['coordinates'][0]
+                crash_point_features.append({
+                    'type': 'Feature',
+                    'geometry': {'type': 'Point', 'coordinates': anchor_coords},
+                    'properties': {
+                        'event_type': 'crash',
+                        'trip_id': trip_id,
+                        'severity': crash['severity'],
+                        'peak_g': crash['peak_g'],
+                        'suddenness_s': crash['suddenness_s'],
+                        'speed_at_impact_kmh': anchor_feat['properties']['Speed'],
+                        'came_to_stop': crash['came_to_stop'],
+                        'recovery_time_s': crash['recovery_time_s'],
+                        'unresolved': crash['unresolved'],
+                        'time_str': anchor_feat['properties']['time_str'],
+                    }
+                })
         if tagged_crashes:
-            print(f"    🚨 Crash events mapped onto {tagged_crashes} output segment(s)")
+            print(f"    🚨 Crash events mapped onto {tagged_crashes} output segment(s), "
+                  f"{len(crash_point_features)} crash marker(s) emitted")
 
-        return {'type': 'FeatureCollection', 'features': new_features}, file_metadata
+        return {'type': 'FeatureCollection', 'features': new_features + crash_point_features}, file_metadata
     
     except Exception as e:
         import traceback
