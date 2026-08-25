@@ -736,15 +736,6 @@ function getCrashOutcomeExpression() {
 }
 
 function getCrashColorExpression() {
-  if (crashClassification === 'type') {
-    return getCrashTypeExpression();
-  }
-
-  if (crashClassification === 'outcome') {
-    return getCrashOutcomeExpression();
-  }
-
-  // Default = impact intensity
   return [
     'match', ['get', 'severity'],
     'Severe', '#ff1744',
@@ -820,63 +811,173 @@ function buildCrashFeatures(features) {
 function setupCrashLayer(geojson, labelLayerId) {
   const crashData = buildCrashFeatures(geojson.features || []);
 
-  map.addSource('crash-events', { type: 'geojson', data: crashData });
+  map.addSource('crash-events', {
+    type: 'geojson',
+    data: crashData
+  });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRASH HALO
+  //
+  // Outcome is represented by the halo:
+  //   Resolved   → smaller / softer halo
+  //   Unresolved → larger / stronger halo
+  //
+  // Intensity still controls the colour.
+  // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-halo',
     type: 'circle',
     source: 'crash-events',
-    layout: { visibility: 'none' },
+    layout: {
+      visibility: 'none'
+    },
     paint: {
       'circle-color': getCrashColorExpression(),
+
       'circle-radius': [
-        'interpolate', ['linear'], ['zoom'],
-        10, 14,
-        14, 22,
-        17, 32,
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        10,
+        [
+          'case',
+          ['==', ['get', 'crash_outcome'], 'Unresolved'],
+          18,
+          10
+        ],
+        14,
+        [
+          'case',
+          ['==', ['get', 'crash_outcome'], 'Unresolved'],
+          29,
+          16
+        ],
+        17,
+        [
+          'case',
+          ['==', ['get', 'crash_outcome'], 'Unresolved'],
+          42,
+          23
+        ]
       ],
-      'circle-blur':            1.0,
+
+      'circle-blur': [
+        'case',
+        ['==', ['get', 'crash_outcome'], 'Unresolved'],
+        0.85,
+        1.0
+      ],
+
       'circle-opacity': [
-        'case', ['get', 'unresolved'],
-        0.6,
-        0.35,
+        'case',
+        ['==', ['get', 'crash_outcome'], 'Unresolved'],
+        0.65,
+        0.28
       ],
-      'circle-pitch-alignment': 'map',
-    },
+
+      'circle-pitch-alignment': 'map'
+    }
   }, labelLayerId);
 
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CRASH SYMBOL
+  //
+  // Type is represented by shape:
+  //
+  //   Stationary Fall → ◆
+  //   Low-Speed Fall  → ▲
+  //   Moving Crash    → ●
+  //   Unclassified    → ■
+  //
+  // Intensity still controls the colour.
+  // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-dot',
-    type: 'circle',
+    type: 'symbol',
     source: 'crash-events',
-    layout: { visibility: 'none' },
-    paint: {
-      'circle-color':        getCrashColorExpression(),
-      'circle-radius':       ['interpolate', ['linear'], ['zoom'], 10, 6, 14, 9, 17, 13],
-      'circle-stroke-color': '#ffffff',
-      'circle-stroke-width': 2,
-      'circle-opacity':         0.95,
-      'circle-pitch-alignment': 'map',
+    layout: {
+      visibility: 'none',
+
+      'text-field': [
+        'match',
+        ['get', 'crash_type'],
+
+        'Stationary Fall', '◆',
+        'Low-Speed Fall',  '▲',
+        'Moving Crash',    '●',
+        'Unclassified',    '■',
+
+        '■'
+      ],
+
+      'text-size': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        10, 10,
+        14, 15,
+        17, 21
+      ],
+
+      'text-font': [
+        'Arial Unicode MS Regular'
+      ],
+
+      'text-allow-overlap': true,
+      'text-ignore-placement': true
     },
+
+    paint: {
+      // Intensity = colour
+      'text-color': getCrashColorExpression(),
+
+      'text-halo-color': '#ffffff',
+
+      'text-halo-width': [
+        'case',
+        ['==', ['get', 'crash_outcome'], 'Unresolved'],
+        2.5,
+        1.5
+      ],
+
+      'text-opacity': 0.98
+    }
   }, labelLayerId);
 
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // POPUP
+  // ─────────────────────────────────────────────────────────────────────────
   map.on('click', 'crash-events-dot', (e) => {
     e.preventDefault();
-    if (e.originalEvent) e.originalEvent.stopPropagation();
+
+    if (e.originalEvent) {
+      e.originalEvent.stopPropagation();
+    }
+
     const p = e.features[0].properties;
 
     const speedLine = p.speed_at_impact_kmh != null
       ? `🚴 Speed at impact: ${p.speed_at_impact_kmh} km/h`
       : `🚴 Speed at impact: unknown`;
 
-    const crashType = getCrashTypeLabel(p);
-    const crashOutcome = getCrashOutcomeLabel(p);
+    const crashType = p.crash_type || 'Unclassified';
 
-    const recoveryLine = p.unresolved
-      ? `⚠️ Wheel didn't turn again for the rest of the trip`
-      : p.came_to_stop
-        ? `🧍 Came to a stop, moving again after ${p.recovery_time_s}s`
-        : `↪️ Kept moving — no stop detected nearby`;
+    const crashOutcome = p.crash_outcome ||
+      (p.unresolved === true || p.unresolved === 'true'
+        ? 'Unresolved'
+        : p.came_to_stop === true || p.came_to_stop === 'true'
+          ? 'Resolved'
+          : 'Unclassified');
+
+    const recoveryLine =
+      p.unresolved === true || p.unresolved === 'true'
+        ? `⚠️ <strong>Wheel didn't turn again for the rest of the trip</strong>`
+        : p.came_to_stop === true || p.came_to_stop === 'true'
+          ? `🧍 Came to a stop, moving again after ${p.recovery_time_s}s`
+          : `↪️ Kept moving — no stop detected nearby`;
 
     new mapboxgl.Popup()
       .setLngLat(e.lngLat)
@@ -884,7 +985,7 @@ function setupCrashLayer(geojson, labelLayerId) {
         <strong>🚨 ${p.severity} Impact</strong><br>
         💥 Peak force: ${p.peak_g}g<br>
         ⚡ Onset: ${p.suddenness_s}s to peak<br>
-        🚴 Type: ${crashType}<br>
+        🚲 Type: ${crashType}<br>
         📍 Outcome: ${crashOutcome}<br>
         ${speedLine}<br>
         ${recoveryLine}<br>
@@ -893,8 +994,14 @@ function setupCrashLayer(geojson, labelLayerId) {
       .addTo(map);
   });
 
-  map.on('mouseenter', 'crash-events-dot', () => { map.getCanvas().style.cursor = 'pointer'; });
-  map.on('mouseleave', 'crash-events-dot', () => { map.getCanvas().style.cursor = ''; });
+
+  map.on('mouseenter', 'crash-events-dot', () => {
+    map.getCanvas().style.cursor = 'pointer';
+  });
+
+  map.on('mouseleave', 'crash-events-dot', () => {
+    map.getCanvas().style.cursor = '';
+  });
 
   console.log('✅ Crash/fall layer added');
 }
@@ -1415,32 +1522,6 @@ function renderCrashLegend() {
   const legend = document.getElementById('crashLegend');
   if (!legend) return;
 
-  let title = 'Colour = impact intensity';
-  let items = [
-    ['#ffea00', 'Minor'],
-    ['#ff9100', 'Hard'],
-    ['#ff1744', 'Severe'],
-  ];
-
-  if (crashClassification === 'type') {
-    title = 'Colour = accident type';
-    items = [
-      ['#9C27B0', 'Stationary Fall'],
-      ['#FFCC33', 'Low-Speed Fall'],
-      ['#2196F3', 'Moving Crash'],
-      ['#9E9E9E', 'Unclassified'],
-    ];
-  }
-
-  if (crashClassification === 'outcome') {
-    title = 'Colour = outcome';
-    items = [
-      ['#2196F3', 'Resolved'],
-      ['#E91E63', 'Unresolved'],
-      ['#9E9E9E', 'Unclassified'],
-    ];
-  }
-
   legend.innerHTML = `
     <strong>CRASHES &amp; FALLS</strong>
 
@@ -1476,27 +1557,91 @@ function renderCrashLegend() {
       </label>
     </div>
 
-    <p style="margin:4px 0 8px; font-size:0.75rem; opacity:0.8;">
-      ${title}
+    <p style="margin:6px 0 8px; font-size:0.75rem; opacity:0.8;">
+      All three dimensions are shown simultaneously:
     </p>
 
-    ${items.map(([color, label]) => `
+    <div class="speed-legend-item">
+      <div class="speed-color-box" style="background:#ffea00;"></div>
+      <span><strong>Colour</strong> = Minor</span>
+    </div>
+
+    <div class="speed-legend-item">
+      <div class="speed-color-box" style="background:#ff9100;"></div>
+      <span><strong>Colour</strong> = Hard</span>
+    </div>
+
+    <div class="speed-legend-item">
+      <div class="speed-color-box" style="background:#ff1744;"></div>
+      <span><strong>Colour</strong> = Severe</span>
+    </div>
+
+    <div style="margin-top:8px;">
       <div class="speed-legend-item">
-        <div
-          class="speed-color-box"
-          style="background:${color};"
-        ></div>
-        <span>${label}</span>
+        <span style="font-size:16px; width:20px; text-align:center;">◆</span>
+        <span><strong>◆</strong> Stationary Fall</span>
       </div>
-    `).join('')}
+
+      <div class="speed-legend-item">
+        <span style="font-size:16px; width:20px; text-align:center;">▲</span>
+        <span><strong>▲</strong> Low-Speed Fall</span>
+      </div>
+
+      <div class="speed-legend-item">
+        <span style="font-size:16px; width:20px; text-align:center;">●</span>
+        <span><strong>●</strong> Moving Crash</span>
+      </div>
+
+      <div class="speed-legend-item">
+        <span style="font-size:16px; width:20px; text-align:center;">■</span>
+        <span><strong>■</strong> Unclassified</span>
+      </div>
+    </div>
+
+    <div style="margin-top:8px;">
+      <div class="speed-legend-item">
+        <span style="font-size:16px; width:20px; text-align:center;">◉</span>
+        <span><strong>Normal halo</strong> = Resolved</span>
+      </div>
+
+      <div class="speed-legend-item">
+        <span style="font-size:16px; width:20px; text-align:center;">◎</span>
+        <span><strong>Large halo</strong> = Unresolved</span>
+      </div>
+    </div>
   `;
 
   // Re-bind the radios because the legend HTML is rebuilt dynamically.
-  legend.querySelectorAll('input[name="crashClassification"]')
+  legend
+    .querySelectorAll('input[name="crashClassification"]')
     .forEach(radio => {
       radio.addEventListener('change', (e) => {
         crashClassification = e.target.value;
-        updateCrashLayerColors();
+
+        // The selected mode controls the legend emphasis,
+        // while colour/shape/halo remain visible simultaneously.
+        renderCrashLegend();
+
+        if (map.getLayer('crash-events-halo')) {
+          map.setPaintProperty(
+            'crash-events-halo',
+            'circle-opacity',
+            crashClassification === 'outcome'
+              ? [
+                  'case',
+                  ['==', ['get', 'crash_outcome'], 'Unresolved'],
+                  0.85,
+                  0.20
+                ]
+              : [
+                  'case',
+                  ['==', ['get', 'crash_outcome'], 'Unresolved'],
+                  0.65,
+                  0.28
+                ]
+          );
+        }
+
         setTimeout(updateLegendPositions, 50);
       });
     });
