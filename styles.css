@@ -518,14 +518,6 @@ input[type="range"] {
   border-radius: 4px;
 }
 
-#crashLegend .cl-cat-dot {
-  flex: 0 0 auto;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #ffea00, #ff9100 50%, #ff1744);
-}
-
 #crashLegend .cl-cat-name { flex: 1; }
 
 #crashLegend .cl-chevron {

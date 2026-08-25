@@ -1505,7 +1505,6 @@ function renderCrashLegend() {
     <p class="cl-sub">Tap a category to see what its colours &amp; symbols mean.</p>
     ${CRASH_LEGEND_CATEGORIES.map((cat, i) => `
       <button type="button" class="cl-cat" data-cat="${cat.id}" aria-expanded="${i === 0}">
-        <span class="cl-cat-dot"></span>
         <span class="cl-cat-name">${cat.label}</span>
         <span class="cl-chevron">▶</span>
       </button>
