@@ -1504,11 +1504,11 @@ function renderCrashLegend() {
     <strong>CRASHES &amp; FALLS</strong>
     <p class="cl-sub">Tap a category to see what its colours &amp; symbols mean.</p>
     ${CRASH_LEGEND_CATEGORIES.map((cat, i) => `
-      <button type="button" class="cl-cat" data-cat="${cat.id}" aria-expanded="${i === 0}">
+      <button type="button" class="cl-cat" data-cat="${cat.id}" aria-expanded="false">
         <span class="cl-cat-name">${cat.label}</span>
         <span class="cl-chevron">▶</span>
       </button>
-      <div class="cl-panel" data-panel="${cat.id}" data-open="${i === 0}">
+      <div class="cl-panel" data-panel="${cat.id}" data-open="false">
         <p class="cl-sub" style="margin:0 0 6px;">${cat.hint}</p>
         ${cat.rows.map(r => `
           <div class="cl-row">
