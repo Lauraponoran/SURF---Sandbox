@@ -45,22 +45,20 @@ MIN_HROT_FOR_BRAKING = 2
 #      brake (bike keeps moving/vibrating), independent of speed.
 # GPS speed, when available, is used only as corroboration afterward (the
 # bike shouldn't still be visibly cruising) — never as a precondition.
-CRASH_IMPACT_G = 4.0                # |Acc Y| spike that counts as a possible impact
+CRASH_IMPACT_G = 6.0                # |Acc Y| spike that counts as a possible impact
 CRASH_SETTLE_G = 1.5                # post-impact Acc Y std must drop below this
-CRASH_SETTLE_WINDOW_SAMPLES = 80    # ~1.6s at SAMPLE_RATE_HZ=50
+CRASH_SETTLE_WINDOW_SAMPLES = 100   # 2.0s at SAMPLE_RATE_HZ=50
 CRASH_MIN_GAP_SAMPLES = 150         # ~3s of quiet needed to split two impacts into separate events
 CRASH_SPEED_CONFIRM_KMH = 6.0       # forward-filled GPS speed must stay at/under this after impact
 
 # Severity buckets for the map legend (Minor / Hard / Severe), by peak |Acc Y| in g.
-CRASH_SEVERITY_MINOR_MAX_G = 6.0    # < this -> Minor
-CRASH_SEVERITY_HARD_MAX_G = 10.0    # < this -> Hard, else Severe
+CRASH_SEVERITY_MINOR_MAX_G = 8.0     # < this -> Minor
+CRASH_SEVERITY_HARD_MAX_G = 11.0    # < this -> Hard, else Severe
 
 # "Did the bike stop, and did it move again?" — read from raw wheel-rotation
-# ticks after the impact, independent of the accelerometer settle check above.
-CRASH_RESUME_HROT_TICKS = 4         # ticks of wheel rotation that count as "moving again"
-CRASH_MIN_STOP_GAP_SAMPLES = 25     # ~0.5s of no rotation required to call it a real stop
-                                     # (a shorter gap means the wheel barely paused — treat as
-                                     # having kept moving through the impact, not a stop/fall)
+# ticks after the impact.
+CRASH_RESUME_HROT_TICKS = 4          # ticks of wheel rotation that count as "moving again"
+CRASH_MIN_STOP_GAP_SAMPLES = 100     # ~2.0s of continuous no rotation required for a confirmed stop
 
 # ─── Display-only smoothing ──────────────────────────────────────────────────
 # Raw wheel-rotation speed is segment-by-segment (irregular hrot tick spacing),
@@ -271,32 +269,54 @@ def classify_crash_severity(peak_g):
 
 def analyze_crash_recovery(hrot_data, end_idx):
     """
-    Look forward from the end of a crash's impact burst to see whether the
-    wheel starts turning again, and how long that took.
+    Look forward from the end of a crash's impact burst to determine whether
+    the wheel actually stopped for at least the required duration.
 
     Returns (came_to_stop, recovery_time_s, unresolved):
-      - unresolved=True    the wheel never turns again for the rest of the
-                            trip's recorded data — flagged distinctly in the
-                            UI since it may mean the rider never got back on.
-      - came_to_stop=True  the wheel paused for a real gap (>= CRASH_MIN_STOP_GAP_SAMPLES)
-                            before resuming; recovery_time_s is that gap.
-      - came_to_stop=False the wheel kept turning almost immediately — the
-                            bike didn't really stop, this was a jolt, not a fall.
+
+      - came_to_stop=True:
+          the wheel remained stopped for at least CRASH_MIN_STOP_GAP_SAMPLES
+          before rotating again.
+
+      - unresolved=True:
+          the wheel never resumed during the recorded trip, but there is
+          enough post-impact data to confirm that it remained stopped for
+          at least the required duration.
+
+      - came_to_stop=False:
+          the wheel resumed too quickly, so the event is treated as a jolt
+          rather than a confirmed fall.
     """
     n = len(hrot_data)
+
+    if end_idx >= n:
+        return False, None, False
+
     baseline = hrot_data[end_idx]
     resume_idx = None
+
     for idx in range(end_idx + 1, n):
         if hrot_data[idx] - baseline >= CRASH_RESUME_HROT_TICKS:
             resume_idx = idx
             break
 
+    # Wheel never resumed.
+    # Only call this a genuine stop if we have at least 2 seconds of
+    # post-impact data proving that it stayed stopped.
     if resume_idx is None:
-        return False, None, True
+        stop_samples = n - end_idx - 1
+
+        if stop_samples >= CRASH_MIN_STOP_GAP_SAMPLES:
+            return True, None, True
+
+        return False, None, False
 
     gap = resume_idx - end_idx
+
     if gap >= CRASH_MIN_STOP_GAP_SAMPLES:
         return True, round(gap / SAMPLE_RATE_HZ, 1), False
+
+    # Wheel resumed too quickly — likely a bump/jolt rather than a fall.
     return False, None, False
 
 def _forward_fill(arr):
@@ -310,12 +330,16 @@ def _forward_fill(arr):
             last = out[i]
     return out
 
-def detect_crash_events(acc_y_data, speed_gps_data=None,
-                         impact_g=CRASH_IMPACT_G,
-                         settle_g=CRASH_SETTLE_G,
-                         settle_window=CRASH_SETTLE_WINDOW_SAMPLES,
-                         min_gap=CRASH_MIN_GAP_SAMPLES,
-                         speed_confirm_kmh=CRASH_SPEED_CONFIRM_KMH):
+def detect_crash_events(
+        acc_y_data,
+        speed_gps_data,
+        hrot_data,
+        impact_g=CRASH_IMPACT_G,
+        settle_g=CRASH_SETTLE_G,
+        settle_window=CRASH_SETTLE_WINDOW_SAMPLES,
+        min_gap=CRASH_MIN_GAP_SAMPLES,
+        speed_confirm_kmh=CRASH_SPEED_CONFIRM_KMH,
+    ):
     """
     Detect crash/fall events from raw per-sample Acc Y (before segmenting
     into wheel-rotation line segments, so the full ~50Hz resolution is used).
@@ -359,6 +383,17 @@ def detect_crash_events(acc_y_data, speed_gps_data=None,
         else:
             speed_ok = True
 
+        came_to_stop, recovery_time_s, unresolved = analyze_crash_recovery(
+            hrot_data,
+            e
+        )
+
+        confirmed = (
+            settled
+            and speed_ok
+            and came_to_stop
+        )
+        
         results.append({
             'start_idx': int(s),
             'end_idx': int(e),
@@ -366,7 +401,10 @@ def detect_crash_events(acc_y_data, speed_gps_data=None,
             'peak_g': round(peak_g, 2),
             'settled': bool(settled),
             'speed_low_after': bool(speed_ok),
-            'is_crash': bool(settled and speed_ok),
+            'came_to_stop': bool(came_to_stop),
+            'recovery_time_s': recovery_time_s,
+            'unresolved': bool(unresolved),
+            'is_crash': bool(confirmed),
         })
     return results
 
@@ -474,11 +512,19 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         # Crash/fall detection runs on raw per-sample data (before trimming
         # and before segmenting into wheel-rotation line segments) so it has
         # full accelerometer resolution to work with.
+
         gps_speed_data = extract_gps_speed_data(features)
         hrot_raw_data = extract_hrot_data(features)
         samples_seq = [safe_int(f.get('properties', {}).get('Samples', 0), 0) for f in features]
-        crash_events_raw = detect_crash_events(acc_y_data, gps_speed_data)
+
+        crash_events_raw = detect_crash_events(
+            acc_y_data,
+            gps_speed_data,
+            hrot_raw_data
+        )
+
         confirmed_crashes = [e for e in crash_events_raw if e['is_crash']]
+
         if confirmed_crashes:
             print(f"    🚨 Crash/fall events detected: {len(confirmed_crashes)}")
         # Enrich each confirmed crash with onset timing and recovery info while
@@ -486,7 +532,10 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         crash_events_enriched = []
         for e in confirmed_crashes:
             suddenness_s = round((e['peak_idx'] - e['start_idx']) / SAMPLE_RATE_HZ, 2)
-            came_to_stop, recovery_time_s, unresolved = analyze_crash_recovery(hrot_raw_data, e['end_idx'])
+            came_to_stop = e['came_to_stop']
+            recovery_time_s = e['recovery_time_s']
+            unresolved = e['unresolved']
+
             crash_events_enriched.append({
                 'sample_start': samples_seq[e['start_idx']],
                 'sample_end': samples_seq[e['end_idx']],

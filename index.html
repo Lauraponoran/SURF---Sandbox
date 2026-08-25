@@ -81,20 +81,23 @@
         </p>
         <h5>Crashes &amp; Falls</h5>
         <p>
-          A "g" is a unit of acceleration equal to Earth's gravity (9.8 m/s²)— 
-          the standard way to measure impact force.
+          A "g" is a unit of acceleration equal to Earth's gravity (9.8 m/s²).
 
-          An incident is flagged when the accelerometer registers a sharp impact
-          of 6g or greater. To rule out false positives from potholes or rough 
-          terrain, the system then checks that the bike came to rest afterward: 
-          within 3 seconds of the impact, it looks for either the sensor readings 
-          settling into a narrow band (varying by no more than 1g) for at least 1 
-          continuous second, or the wheel rotation stopping advancing for that 
-          same stretch— since a spinning wheel can keep vibrating even after the 
-          bike itself is down. Either signal is enough to confirm a fall; if neither 
-          settles, the spike is treated as normal riding activity. Confirmed incidents 
-          are classified by peak impact force: 6–8g is Minor, 8–11g is Hard, and 11g or 
-          greater is Severe.
+          The system first flags a potential impact when the accelerometer records
+          a sharp acceleration of 6g or greater. To reduce false
+          positives from potholes, bumps, and hard braking, an impact is only
+          classified as a confirmed crash when the bike subsequently shows signs
+          of actually stopping: the acceleration must settle into a relatively
+          stable state, the recorded speed must fall to a low level, and the wheel
+          must remain stopped for at least 2 continuous seconds.
+          If the wheel resumes sooner, the event is treated as a jolt rather than
+          a crash.
+          
+          Confirmed incidents are classified by peak impact force:
+          below 8g is Minor, 8g to below 11g is Hard,
+          and 11g or greater is Severe. If the wheel remains stopped
+          for the rest of the recorded trip after a confirmed impact, the event is
+          marked as unresolved.
         </p>
       </section>
       <section>
