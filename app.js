@@ -916,11 +916,11 @@ function setupCrashLayer(geojson, labelLayerId) {
         'interpolate',
         ['linear'],
         ['zoom'],
-        10, 10,
-        14, 15,
-        17, 21
+        10, 16,
+        14, 23,
+        17, 31
       ],
-      
+
       'text-allow-overlap': true,
       'text-ignore-placement': true
     },
@@ -934,8 +934,8 @@ function setupCrashLayer(geojson, labelLayerId) {
       'text-halo-width': [
         'case',
         ['==', ['get', 'crash_outcome'], 'Unresolved'],
-        2.5,
-        1.5
+        4,
+        2
       ],
 
       'text-opacity': 0.98
