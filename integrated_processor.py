@@ -56,6 +56,11 @@ CRASH_SPEED_CONFIRM_KMH = 6.0       # forward-filled GPS speed must stay at/unde
 CRASH_SEVERITY_MINOR_MAX_G = 8.0     # < this -> Minor
 CRASH_SEVERITY_HARD_MAX_G = 11.0    # < this -> Hard, else Severe
 
+# Accident-type classification thresholds, based on wheel speed immediately
+# before the impact. These classify the event independently from intensity.
+CRASH_STATIONARY_MAX_KMH = 1.0     # <= this -> Stationary Fall
+CRASH_LOW_SPEED_MAX_KMH = 10.0      # >1 to <=10 -> Low-Speed Fall; >10 -> Moving Crash
+
 # "Did the bike stop, and did it move again?" — read from raw wheel-rotation
 # ticks after the impact.
 CRASH_RESUME_HROT_TICKS = 4          # ticks of wheel rotation that count as "moving again"
@@ -267,6 +272,59 @@ def classify_crash_severity(peak_g):
     if mag < CRASH_SEVERITY_HARD_MAX_G:
         return 'Hard'
     return 'Severe'
+
+def classify_crash_type(preimpact_speed_kmh):
+    """Classify an incident by how fast the bike was moving immediately before impact."""
+    if preimpact_speed_kmh is None or np.isnan(preimpact_speed_kmh):
+        return 'Unclassified'
+    if preimpact_speed_kmh <= CRASH_STATIONARY_MAX_KMH:
+        return 'Stationary Fall'
+    if preimpact_speed_kmh <= CRASH_LOW_SPEED_MAX_KMH:
+        return 'Low-Speed Fall'
+    return 'Moving Crash'
+
+
+def classify_crash_outcome(unresolved, came_to_stop, recovery_time_s):
+    """Classify the post-impact outcome independently from crash type."""
+    if unresolved:
+        return 'Unresolved'
+    if came_to_stop and recovery_time_s is not None:
+        return 'Resolved'
+    return 'Unclassified'
+
+
+def estimate_preimpact_wheel_speed(hrot_data, samples_seq, peak_idx, wheel_circumference_m):
+    """Estimate wheel speed over the ~1 second immediately before the impact peak."""
+    if not hrot_data or peak_idx <= 0 or not samples_seq or peak_idx >= len(samples_seq):
+        return None
+
+    peak_sample = samples_seq[peak_idx]
+    target_sample = peak_sample - int(SAMPLE_RATE_HZ)
+    prior_idx = None
+    for idx in range(peak_idx - 1, -1, -1):
+        if samples_seq[idx] <= target_sample:
+            prior_idx = idx
+            break
+    if prior_idx is None:
+        prior_idx = 0
+
+    sample_diff = samples_seq[peak_idx] - samples_seq[prior_idx]
+    if sample_diff <= 0:
+        return None
+
+    hrot_diff = hrot_data[peak_idx] - hrot_data[prior_idx]
+    if hrot_diff <= 0:
+        return 0.0
+
+    time_s = sample_diff * SECONDS_PER_SAMPLE
+    if time_s <= 0:
+        return None
+
+    revolutions = hrot_diff / 2.0
+    distance_m = revolutions * wheel_circumference_m
+    speed_kmh = (distance_m / time_s) * 3.6
+    return round(min(speed_kmh, 40.0), 1)
+
 
 def analyze_crash_recovery(hrot_data, end_idx):
     """
@@ -536,6 +594,13 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
             came_to_stop = e['came_to_stop']
             recovery_time_s = e['recovery_time_s']
             unresolved = e['unresolved']
+            preimpact_speed_kmh = estimate_preimpact_wheel_speed(
+                hrot_raw_data, samples_seq, e['peak_idx'], wheel_circumference_m
+            )
+            crash_type = classify_crash_type(preimpact_speed_kmh)
+            crash_outcome = classify_crash_outcome(
+                unresolved, came_to_stop, recovery_time_s
+            )
 
             crash_events_enriched.append({
                 'sample_start': samples_seq[e['start_idx']],
@@ -546,6 +611,9 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                 'came_to_stop': came_to_stop,
                 'recovery_time_s': recovery_time_s,
                 'unresolved': unresolved,
+                'preimpact_speed_kmh': preimpact_speed_kmh,
+                'crash_type': crash_type,
+                'crash_outcome': crash_outcome,
             })
         crash_sample_ranges = crash_events_enriched
 
@@ -836,6 +904,9 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                         'came_to_stop': crash['came_to_stop'],
                         'recovery_time_s': crash['recovery_time_s'],
                         'unresolved': crash['unresolved'],
+                        'preimpact_speed_kmh': crash['preimpact_speed_kmh'],
+                        'crash_type': crash['crash_type'],
+                        'crash_outcome': crash['crash_outcome'],
                         'time_str': anchor_feat['properties']['time_str'],
                     }
                 })

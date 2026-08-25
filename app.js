@@ -31,6 +31,12 @@ let activeFilter = null;
 let showBraking = false;
 let showCrashes = false;
 
+// Crash display classification:
+//   intensity = Minor / Hard / Severe
+//   type      = Stationary Fall / Low-Speed Fall / Moving Crash / Unclassified
+//   outcome   = Resolved / Unresolved
+let crashClassification = 'intensity';
+
 // ─── Sensor colours ───────────────────────────────────────────────────────────
 const SENSOR_COLORS = [
   '#34CCCC','#FFCC33','#5B8FFF','#CC5BAA','#33CCAA',
@@ -287,7 +293,14 @@ function formatDuration(s) {
 }
 
 function updateResetButtonVisibility() {
-  const active = showSpeedColors || showRoadQuality || showAveragedSegments || showBraking || showCrashes || searchActive || !!selectedTrip;
+  const active =
+    showSpeedColors ||
+    showRoadQuality ||
+    showAveragedSegments ||
+    showBraking ||
+    showCrashes ||
+    searchActive ||
+    !!selectedTrip;
   document.getElementById('resetButton').style.display = active ? 'block' : 'none';
 }
 
@@ -373,6 +386,8 @@ function resetSelection() {
   showRoadQuality      = false;
   showAveragedSegments = false;
   showBraking          = false;
+  showCrashes          = false;
+  crashClassification  = 'intensity';
   showCrashes          = false;
 
   if (currentPopup) { currentPopup.remove(); currentPopup = null; }
@@ -699,7 +714,37 @@ function setupBrakingLayer(geojson, labelLayerId) {
 }
 
 // ─── Crash / fall events ────────────────────────────────────────────────────
+function getCrashTypeExpression() {
+  return [
+    'match', ['get', 'crash_type'],
+    'Stationary Fall', '#9C27B0',
+    'Low-Speed Fall',  '#FFCC33',
+    'Moving Crash',    '#2196F3',
+    'Unclassified',    '#9E9E9E',
+    /* default */      '#9E9E9E',
+  ];
+}
+
+function getCrashOutcomeExpression() {
+  return [
+    'match', ['get', 'crash_outcome'],
+    'Resolved',   '#2196F3',
+    'Unresolved', '#E91E63',
+    'Unclassified', '#9E9E9E',
+    /* default */ '#9E9E9E',
+  ];
+}
+
 function getCrashColorExpression() {
+  if (crashClassification === 'type') {
+    return getCrashTypeExpression();
+  }
+
+  if (crashClassification === 'outcome') {
+    return getCrashOutcomeExpression();
+  }
+
+  // Default = impact intensity
   return [
     'match', ['get', 'severity'],
     'Severe', '#ff1744',
@@ -707,6 +752,57 @@ function getCrashColorExpression() {
     'Minor',  '#ffea00',
     /* default */ '#ffea00',
   ];
+}
+
+function getCrashTypeLabel(properties) {
+  if (properties.crash_type) return properties.crash_type;
+
+  const speed = Number(
+    properties.preimpact_speed_kmh ??
+    properties.speed_at_impact_kmh
+  );
+
+  if (!Number.isFinite(speed)) return 'Unclassified';
+  if (speed <= 1) return 'Stationary Fall';
+  if (speed <= 10) return 'Low-Speed Fall';
+  return 'Moving Crash';
+}
+
+function getCrashOutcomeLabel(properties) {
+  if (properties.crash_outcome) return properties.crash_outcome;
+
+  if (properties.unresolved === true || properties.unresolved === 'true') {
+    return 'Unresolved';
+  }
+
+  if (properties.came_to_stop === true || properties.came_to_stop === 'true') {
+    return 'Resolved';
+  }
+
+  return 'Unclassified';
+}
+
+function updateCrashLayerColors() {
+  if (!map.getLayer('crash-events-halo') ||
+      !map.getLayer('crash-events-dot')) {
+    return;
+  }
+
+  const colorExpression = getCrashColorExpression();
+
+  map.setPaintProperty(
+    'crash-events-halo',
+    'circle-color',
+    colorExpression
+  );
+
+  map.setPaintProperty(
+    'crash-events-dot',
+    'circle-color',
+    colorExpression
+  );
+
+  renderCrashLegend();
 }
 
 function buildCrashFeatures(features) {
@@ -773,8 +869,11 @@ function setupCrashLayer(geojson, labelLayerId) {
       ? `🚴 Speed at impact: ${p.speed_at_impact_kmh} km/h`
       : `🚴 Speed at impact: unknown`;
 
+    const crashType = getCrashTypeLabel(p);
+    const crashOutcome = getCrashOutcomeLabel(p);
+
     const recoveryLine = p.unresolved
-      ? `⚠️ <strong>Wheel didn't turn again for the rest of the trip</strong>`
+      ? `⚠️ Wheel didn't turn again for the rest of the trip`
       : p.came_to_stop
         ? `🧍 Came to a stop, moving again after ${p.recovery_time_s}s`
         : `↪️ Kept moving — no stop detected nearby`;
@@ -785,6 +884,8 @@ function setupCrashLayer(geojson, labelLayerId) {
         <strong>🚨 ${p.severity} Impact</strong><br>
         💥 Peak force: ${p.peak_g}g<br>
         ⚡ Onset: ${p.suddenness_s}s to peak<br>
+        🚴 Type: ${crashType}<br>
+        📍 Outcome: ${crashOutcome}<br>
         ${speedLine}<br>
         ${recoveryLine}<br>
         🕐 ${p.time_str || 'time unknown'} · trip ${p.trip_id}
@@ -802,16 +903,52 @@ function setupCrashControls() {
   const cb = document.getElementById('crashCheckbox');
   if (!cb) return;
 
+  const classificationRadios =
+    document.querySelectorAll('input[name="crashClassification"]');
+
+  classificationRadios.forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      crashClassification = e.target.value;
+
+      if (showCrashes) {
+        updateCrashLayerColors();
+      } else {
+        renderCrashLegend();
+      }
+
+      setTimeout(updateLegendPositions, 50);
+    });
+  });
+
   cb.addEventListener('change', (e) => {
     showCrashes = e.target.checked;
 
-      const legend     = document.getElementById('crashLegend');
+    const legend = document.getElementById('crashLegend');
     const visibility = showCrashes ? 'visible' : 'none';
 
-    if (map.getLayer('crash-events-halo')) map.setLayoutProperty('crash-events-halo', 'visibility', visibility);
-    if (map.getLayer('crash-events-dot'))  map.setLayoutProperty('crash-events-dot',  'visibility', visibility);
+    if (map.getLayer('crash-events-halo')) {
+      map.setLayoutProperty(
+        'crash-events-halo',
+        'visibility',
+        visibility
+      );
+    }
 
-    if (legend) legend.style.display = showCrashes ? 'block' : 'none';
+    if (map.getLayer('crash-events-dot')) {
+      map.setLayoutProperty(
+        'crash-events-dot',
+        'visibility',
+        visibility
+      );
+    }
+
+    if (legend) {
+      legend.style.display = showCrashes ? 'block' : 'none';
+    }
+
+    if (showCrashes) {
+      updateCrashLayerColors();
+    }
 
     updateResetButtonVisibility();
     setTimeout(updateLegendPositions, 50);
@@ -989,7 +1126,16 @@ map.on('load', async () => {
 });
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
-function isFilteredMode() { return showSpeedColors || showRoadQuality || showAveragedSegments || showBraking || showCrashes || searchActive; }
+function isFilteredMode() {
+  return (
+    showSpeedColors ||
+    showRoadQuality ||
+    showAveragedSegments ||
+    showBraking ||
+    showCrashes ||
+    searchActive
+  );
+}
 
 function updateStatsVisibility() {
   const statsEl = document.getElementById('stats');
@@ -1263,6 +1409,97 @@ function setupControls() {
 
   const isoToggle = document.getElementById('isoToggle');
   if (isoToggle) isoToggle.addEventListener('change', e => updateIsochrone(e.target.checked));
+}
+
+function renderCrashLegend() {
+  const legend = document.getElementById('crashLegend');
+  if (!legend) return;
+
+  let title = 'Colour = impact intensity';
+  let items = [
+    ['#ffea00', 'Minor'],
+    ['#ff9100', 'Hard'],
+    ['#ff1744', 'Severe'],
+  ];
+
+  if (crashClassification === 'type') {
+    title = 'Colour = accident type';
+    items = [
+      ['#9C27B0', 'Stationary Fall'],
+      ['#FFCC33', 'Low-Speed Fall'],
+      ['#2196F3', 'Moving Crash'],
+      ['#9E9E9E', 'Unclassified'],
+    ];
+  }
+
+  if (crashClassification === 'outcome') {
+    title = 'Colour = outcome';
+    items = [
+      ['#2196F3', 'Resolved'],
+      ['#E91E63', 'Unresolved'],
+      ['#9E9E9E', 'Unclassified'],
+    ];
+  }
+
+  legend.innerHTML = `
+    <strong>CRASHES &amp; FALLS</strong>
+
+    <div class="radio-group" style="margin:6px 0 8px;">
+      <label class="radio-label">
+        <input
+          type="radio"
+          name="crashClassification"
+          value="intensity"
+          ${crashClassification === 'intensity' ? 'checked' : ''}
+        >
+        Impact intensity
+      </label>
+
+      <label class="radio-label">
+        <input
+          type="radio"
+          name="crashClassification"
+          value="type"
+          ${crashClassification === 'type' ? 'checked' : ''}
+        >
+        Accident type
+      </label>
+
+      <label class="radio-label">
+        <input
+          type="radio"
+          name="crashClassification"
+          value="outcome"
+          ${crashClassification === 'outcome' ? 'checked' : ''}
+        >
+        Outcome
+      </label>
+    </div>
+
+    <p style="margin:4px 0 8px; font-size:0.75rem; opacity:0.8;">
+      ${title}
+    </p>
+
+    ${items.map(([color, label]) => `
+      <div class="speed-legend-item">
+        <div
+          class="speed-color-box"
+          style="background:${color};"
+        ></div>
+        <span>${label}</span>
+      </div>
+    `).join('')}
+  `;
+
+  // Re-bind the radios because the legend HTML is rebuilt dynamically.
+  legend.querySelectorAll('input[name="crashClassification"]')
+    .forEach(radio => {
+      radio.addEventListener('change', (e) => {
+        crashClassification = e.target.value;
+        updateCrashLayerColors();
+        setTimeout(updateLegendPositions, 50);
+      });
+    });
 }
 
 function updateStatsFromMetadata() {
