@@ -867,13 +867,18 @@ function setupCrashLayer(geojson, labelLayerId) {
 
   // ─────────────────────────────────────────────────────────────────────────
   // POPUP
+  //
+  // Bound to BOTH the circle ('crash-events-halo') and the glyph on top of
+  // it ('crash-events-dot'), since the glyph alone is a tiny hit target —
+  // most clicks on a bubble land on the circle, not the small symbol text.
   // ─────────────────────────────────────────────────────────────────────────
-  map.on('click', 'crash-events-dot', (e) => {
+  function showCrashPopup(e) {
     e.preventDefault();
-
     if (e.originalEvent) {
       e.originalEvent.stopPropagation();
     }
+
+    if (currentPopup) { currentPopup.remove(); }
 
     const p = e.features[0].properties;
 
@@ -897,7 +902,7 @@ function setupCrashLayer(geojson, labelLayerId) {
           ? `🧍 Came to a stop, moving again after ${p.recovery_time_s}s`
           : `↪️ Kept moving — no stop detected nearby`;
 
-    new mapboxgl.Popup()
+    currentPopup = new mapboxgl.Popup()
       .setLngLat(e.lngLat)
       .setHTML(`
         <strong>🚨 ${p.severity} Impact</strong><br>
@@ -910,16 +915,15 @@ function setupCrashLayer(geojson, labelLayerId) {
         🕐 ${p.time_str || 'time unknown'} · trip ${p.trip_id}
       `)
       .addTo(map);
-  });
+  }
 
+  map.on('click', 'crash-events-halo', showCrashPopup);
+  map.on('click', 'crash-events-dot',  showCrashPopup);
 
-  map.on('mouseenter', 'crash-events-dot', () => {
-    map.getCanvas().style.cursor = 'pointer';
-  });
-
-  map.on('mouseleave', 'crash-events-dot', () => {
-    map.getCanvas().style.cursor = '';
-  });
+  map.on('mouseenter', 'crash-events-halo', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'crash-events-halo', () => { map.getCanvas().style.cursor = ''; });
+  map.on('mouseenter', 'crash-events-dot',  () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'crash-events-dot',  () => { map.getCanvas().style.cursor = ''; });
 
   console.log('✅ Crash/fall layer added');
 }
@@ -1038,6 +1042,20 @@ map.on('load', async () => {
     }, labelLayerId);
 
     map.on('click', 'trips-layer', async (e) => {
+      // A crash bubble sits directly on top of its trip's line, and Mapbox
+      // fires each layer's click handler independently — so a click on a
+      // bubble can also match the route underneath it. When the crash
+      // layer is on, let the crash marker's own handler own that click
+      // (crash info) instead of showing route info here, and — just as
+      // importantly — don't set selectedTrip for it, so clicking off the
+      // popup afterwards doesn't reset the crash layer off along with it.
+      if (showCrashes) {
+        const crashHit = map.queryRenderedFeatures(e.point, {
+          layers: ['crash-events-halo', 'crash-events-dot']
+        });
+        if (crashHit.length > 0) return;
+      }
+
       e.preventDefault();
       if (e.originalEvent) e.originalEvent.stopPropagation();
       if (currentPopup) { currentPopup.remove(); }
@@ -1165,11 +1183,11 @@ function updateLegendPositions() {
     'averagedSegmentsLegend',
     'speedLegend',
     'roadQualityLegend',
-    'brakingLegend',
-    'crashLegend'
+    'brakingLegend'
   ];
 
   const sensorLegend = document.getElementById('sensorLegend');
+  const crashLegend  = document.getElementById('crashLegend');
   const mobile = window.matchMedia('(max-width: 768px)').matches;
 
   // Use computed display rather than inline style.display.
@@ -1177,9 +1195,20 @@ function updateLegendPositions() {
     sensorLegend &&
     getComputedStyle(sensorLegend).display !== 'none';
 
+  const crashVisible =
+    crashLegend &&
+    getComputedStyle(crashLegend).display !== 'none';
+
   const others = order
     .map(id => document.getElementById(id))
     .filter(el => el && getComputedStyle(el).display !== 'none');
+
+  // The crash legend is substantially taller than the other filter
+  // legends, so it always sits immediately next to the sensor legend
+  // (second position) instead of wherever it happens to fall in `order` —
+  // otherwise it can end up pushed out to the far edge whenever another
+  // legend is also active, which looks off given its height.
+  if (crashVisible) others.unshift(crashLegend);
 
   const GAP = 10;
   let prev = null;
