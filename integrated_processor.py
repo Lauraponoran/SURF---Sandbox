@@ -681,6 +681,27 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         if len(points) < 2:
             return None, file_metadata
         
+        # HH:mm:ss is only stamped on a fraction of samples (roughly 1 in
+        # 10 in this dataset) — forward-fill it across points in sample
+        # order, then back-fill any leading gap before the first stamp.
+        # Without this, a segment's (or crash's) time_str is only correct
+        # by luck of whether its start point happens to land on a stamped
+        # row; every other point silently gets an empty string.
+        last_time_str, last_time = None, None
+        for p in points:
+            if p['time_str']:
+                last_time_str, last_time = p['time_str'], p['time']
+            elif last_time_str is not None:
+                p['time_str'], p['time'] = last_time_str, last_time
+
+        first_time_str = next((p['time_str'] for p in points if p['time_str']), None)
+        first_time = next((p['time'] for p in points if p['time_str']), None)
+        if first_time_str is not None:
+            for p in points:
+                if p['time_str']:
+                    break
+                p['time_str'], p['time'] = first_time_str, first_time
+        
         # Step 3b: Drop the first and last 100m (privacy / identifiability)
         TRIM_DISTANCE_METRES = 100
         
