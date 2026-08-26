@@ -733,8 +733,35 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                 end_trim_index = k
                 break
 
-        if start_trim_index < end_trim_index:
-            points = points[start_trim_index:end_trim_index]
+        # A confirmed crash whose sample range falls inside a would-be-trimmed
+        # zone loses its anchor once that zone is cut — new_features (below)
+        # only comes from surviving points, and a crash marker with no
+        # overlapping segment is silently dropped, not just fuzzed. Skip the
+        # trim on whichever end has a crash in it, so the crash keeps its
+        # real location instead of disappearing. This does mean that end's
+        # true GPS points are kept (not privacy-trimmed) whenever a crash
+        # lands there — a deliberate trade of location privacy for crash
+        # visibility on that specific trip end.
+        crash_in_start_zone = any(
+            c['sample_start'] < points[start_trim_index]['samples']
+            for c in crash_sample_ranges
+        ) if start_trim_index < len(points) else False
+
+        crash_in_end_zone = any(
+            c['sample_end'] > points[end_trim_index]['samples']
+            for c in crash_sample_ranges
+        ) if end_trim_index < len(points) else False
+
+        effective_start_trim_index = 0 if crash_in_start_zone else start_trim_index
+        effective_end_trim_index = (len(points) - 1) if crash_in_end_zone else end_trim_index
+
+        if crash_in_start_zone:
+            print(f"    ⚠️  Crash within first {TRIM_DISTANCE_METRES}m — keeping full start so it isn't lost")
+        if crash_in_end_zone:
+            print(f"    ⚠️  Crash within last {TRIM_DISTANCE_METRES}m — keeping full end so it isn't lost")
+
+        if effective_start_trim_index < effective_end_trim_index:
+            points = points[effective_start_trim_index:effective_end_trim_index]
             print(f"    ✂️  Trimmed: Start {TRIM_DISTANCE_METRES}m, End {TRIM_DISTANCE_METRES}m")
             print(f"       Remaining points: {len(points)}")
         else:
