@@ -295,7 +295,7 @@ def classify_crash_outcome(unresolved, came_to_stop, recovery_time_s):
 
 def estimate_preimpact_wheel_speed(hrot_data, samples_seq, peak_idx, wheel_circumference_m):
     """Estimate wheel speed over the ~1 second immediately before the impact peak."""
-    if not hrot_data or peak_idx <= 0 or not samples_seq or peak_idx >= len(samples_seq):
+    if len(hrot_data) == 0 or peak_idx <= 0 or not samples_seq or peak_idx >= len(samples_seq):
         return None
 
     peak_sample = samples_seq[peak_idx]
