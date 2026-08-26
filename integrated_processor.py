@@ -1,5 +1,6 @@
 import json
 import math
+import bisect
 import numpy as np
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -923,8 +924,20 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
         # span more than one short segment (or fall in a gap between them),
         # so mark every overlapping one but only emit one marker per crash,
         # anchored at the first matching segment's location.
+        #
+        # A crash's own sample range is often exactly the kind of stretch
+        # the segment builder above skips outright (implausible speed jump,
+        # GPS jump, or the bike sitting stationary right after impact) — so
+        # falling back to `new_features` alone silently drops the crash
+        # marker whenever that happens. Fall back to the nearest raw point
+        # in `points` (not just points that made it into a speed segment)
+        # so a crash never loses its marker just because the moment around
+        # it wasn't clean enough to produce a normal segment.
+        samples_list = [p['samples'] for p in points]
+
         crash_point_features = []
         tagged_crashes = 0
+        fallback_anchors = 0
         for crash in crash_sample_ranges:
             crash_start, crash_end = crash['sample_start'], crash['sample_end']
             anchor_feat = None
@@ -936,31 +949,47 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
                     feat['properties']['crash_intensity_g'] = crash['peak_g']
                     if anchor_feat is None:
                         anchor_feat = feat
+
             if anchor_feat is not None:
-                tagged_crashes += 1
                 anchor_coords = anchor_feat['geometry']['coordinates'][0]
-                crash_point_features.append({
-                    'type': 'Feature',
-                    'geometry': {'type': 'Point', 'coordinates': anchor_coords},
-                    'properties': {
-                        'event_type': 'crash',
-                        'trip_id': trip_id,
-                        'severity': crash['severity'],
-                        'peak_g': crash['peak_g'],
-                        'suddenness_s': crash['suddenness_s'],
-                        'speed_at_impact_kmh': anchor_feat['properties']['Speed'],
-                        'came_to_stop': crash['came_to_stop'],
-                        'recovery_time_s': crash['recovery_time_s'],
-                        'unresolved': crash['unresolved'],
-                        'preimpact_speed_kmh': crash['preimpact_speed_kmh'],
-                        'crash_type': crash['crash_type'],
-                        'crash_outcome': crash['crash_outcome'],
-                        'time_str': anchor_feat['properties']['time_str'],
-                    }
-                })
+                anchor_speed = anchor_feat['properties']['Speed']
+                anchor_time_str = anchor_feat['properties']['time_str']
+            else:
+                target = (crash_start + crash_end) // 2
+                idx = bisect.bisect_left(samples_list, target)
+                idx = min(max(idx, 0), len(points) - 1)
+                if idx > 0 and abs(points[idx - 1]['samples'] - target) <= abs(points[idx]['samples'] - target):
+                    idx -= 1
+                nearest_point = points[idx]
+                anchor_coords = [nearest_point['lon'], nearest_point['lat']]
+                anchor_speed = nearest_point['original_speed']
+                anchor_time_str = nearest_point['time_str']
+                fallback_anchors += 1
+
+            tagged_crashes += 1
+            crash_point_features.append({
+                'type': 'Feature',
+                'geometry': {'type': 'Point', 'coordinates': anchor_coords},
+                'properties': {
+                    'event_type': 'crash',
+                    'trip_id': trip_id,
+                    'severity': crash['severity'],
+                    'peak_g': crash['peak_g'],
+                    'suddenness_s': crash['suddenness_s'],
+                    'speed_at_impact_kmh': anchor_speed,
+                    'came_to_stop': crash['came_to_stop'],
+                    'recovery_time_s': crash['recovery_time_s'],
+                    'unresolved': crash['unresolved'],
+                    'preimpact_speed_kmh': crash['preimpact_speed_kmh'],
+                    'crash_type': crash['crash_type'],
+                    'crash_outcome': crash['crash_outcome'],
+                    'time_str': anchor_time_str,
+                }
+            })
         if tagged_crashes:
-            print(f"    🚨 Crash events mapped onto {tagged_crashes} output segment(s), "
-                  f"{len(crash_point_features)} crash marker(s) emitted")
+            print(f"    🚨 Crash events mapped onto output segment(s), "
+                  f"{len(crash_point_features)} crash marker(s) emitted"
+                  + (f" ({fallback_anchors} via nearest-point fallback, no segment covered them)" if fallback_anchors else ""))
 
         return {'type': 'FeatureCollection', 'features': new_features + crash_point_features}, file_metadata
     

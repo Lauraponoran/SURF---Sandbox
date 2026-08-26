@@ -220,7 +220,9 @@ async function loadTripsGeoJSON() {
   const loadingEl = document.getElementById('loadingIndicator');
   if (loadingEl) loadingEl.style.display = 'block';
   try {
-    const r = await fetch('./trips.geojson');
+    // Cache-bust: browsers otherwise happily keep serving an old cached
+    // copy of this file even after it's been regenerated on disk.
+    const r = await fetch(`./trips.geojson?t=${Date.now()}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const geojson = await r.json();
     console.log(`✅ Loaded trips.geojson — ${geojson.features?.length ?? 0} segments`);
