@@ -923,8 +923,14 @@ def process_geojson_file(filepath, trip_id, saved_metadata, debug=False):
             print(f"  Traceback: {traceback.format_exc()}")
         return None, None
 
-def process_all_trips(input_dir=INPUT_ROOT, output_dir=OUTPUT_ROOT):
-    """Process all GeoJSON files in sensor data directory"""
+def process_all_trips(input_dir=INPUT_ROOT, output_dir=OUTPUT_ROOT, force=False):
+    """Process all GeoJSON files in sensor data directory.
+
+    force: reprocess trips even if an output file already exists. Without
+    this, a trip processed before some logic change (e.g. crash detection,
+    or the time_str fix) keeps serving its old stale output forever, since
+    the existence check below never knows the code has changed.
+    """
     
     input_path = Path(input_dir)
     output_path = Path(output_dir)
@@ -975,7 +981,7 @@ def process_all_trips(input_dir=INPUT_ROOT, output_dir=OUTPUT_ROOT):
             sensor_output_dir = output_path / sensor_id
             output_file = sensor_output_dir / f"{trip_id}_processed.geojson"
             
-            if output_file.exists():
+            if output_file.exists() and not force:
                 print(f"  ✓ {trip_id} already processed")
                 already_processed += 1
                 continue
@@ -1055,8 +1061,13 @@ def process_all_trips(input_dir=INPUT_ROOT, output_dir=OUTPUT_ROOT):
 
 if __name__ == "__main__":
     import sys
-    
-    input_dir  = sys.argv[1] if len(sys.argv) >= 2 else INPUT_ROOT
-    output_dir = sys.argv[2] if len(sys.argv) >= 3 else OUTPUT_ROOT
-    
-    process_all_trips(input_dir, output_dir)
+
+    # --force can appear anywhere in argv; strip it out before treating the
+    # remaining args positionally as input_dir/output_dir.
+    force = "--force" in sys.argv
+    positional = [a for a in sys.argv[1:] if a != "--force"]
+
+    input_dir  = positional[0] if len(positional) >= 1 else INPUT_ROOT
+    output_dir = positional[1] if len(positional) >= 2 else OUTPUT_ROOT
+
+    process_all_trips(input_dir, output_dir, force=force)
