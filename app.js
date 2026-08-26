@@ -746,10 +746,26 @@ function getCrashOutcomeLabel(properties) {
 }
 
 function buildCrashFeatures(features) {
-  const crashFeatures = (features || []).filter(f =>
-    f?.geometry?.type === 'Point' &&
-    f?.properties?.event_type === 'crash'
-  );
+  const crashFeatures = (features || [])
+    .filter(f =>
+      f?.geometry?.type === 'Point' &&
+      f?.properties?.event_type === 'crash'
+    )
+    .map(f => ({
+      ...f,
+      properties: {
+        ...f.properties,
+        // Compute these once, here, so the circle's outcome ring, the
+        // symbol's type glyph, and the popup all read the same
+        // classification — previously they read crash_type/crash_outcome
+        // straight off the raw feature, which only worked when the source
+        // data already had those exact fields; otherwise every marker
+        // silently fell back to "Unclassified" regardless of its actual
+        // speed/outcome data.
+        crash_type: getCrashTypeLabel(f.properties || {}),
+        crash_outcome: getCrashOutcomeLabel(f.properties || {})
+      }
+    }));
   console.log(`🚨 Found ${crashFeatures.length} crash marker(s)`);
   if (crashFeatures.length > 0) {
     console.log('🚨 Crash markers:', crashFeatures);
@@ -886,14 +902,8 @@ function setupCrashLayer(geojson, labelLayerId) {
       ? `🚴 Speed at impact: ${p.speed_at_impact_kmh} km/h`
       : `🚴 Speed at impact: unknown`;
 
-    const crashType = p.crash_type || 'Unclassified';
-
-    const crashOutcome = p.crash_outcome ||
-      (p.unresolved === true || p.unresolved === 'true'
-        ? 'Unresolved'
-        : p.came_to_stop === true || p.came_to_stop === 'true'
-          ? 'Resolved'
-          : 'Unclassified');
+    const crashType = getCrashTypeLabel(p);
+    const crashOutcome = getCrashOutcomeLabel(p);
 
     const recoveryLine =
       p.unresolved === true || p.unresolved === 'true'
@@ -1166,10 +1176,7 @@ function updateStatsVisibility() {
   const sensorLegend = document.getElementById('sensorLegend');
 
   if (sensorLegend) {
-    // Keep the sensor legend visible when crashes are active so
-    // both legends can sit side-by-side.
-    sensorLegend.style.display =
-      (isFilteredMode() && !showCrashes) ? 'none' : 'block';
+    sensorLegend.style.display = isFilteredMode() ? 'none' : 'block';
   }  
 }
 
