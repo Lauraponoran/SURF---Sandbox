@@ -60,7 +60,7 @@ CRASH_SEVERITY_HARD_MAX_G = 11.0    # < this -> Hard, else Severe
 # Accident-type classification thresholds, based on wheel speed immediately
 # before the impact. These classify the event independently from intensity.
 CRASH_STATIONARY_MAX_KMH = 1.0     # <= this -> Stationary Fall
-CRASH_LOW_SPEED_MAX_KMH = 10.0      # >1 to <=10 -> Low-Speed Fall; >10 -> Moving Crash
+CRASH_LOW_SPEED_MAX_KMH = 10.0      # >1 to <=10 -> Low-Speed Fall; >10 -> High-Speed Fall
 
 # "Did the bike stop, and did it move again?" — read from raw wheel-rotation
 # ticks after the impact.
@@ -282,7 +282,7 @@ def classify_crash_type(preimpact_speed_kmh):
         return 'Stationary Fall'
     if preimpact_speed_kmh <= CRASH_LOW_SPEED_MAX_KMH:
         return 'Low-Speed Fall'
-    return 'Moving Crash'
+    return 'High-Speed Fall'
 
 
 def classify_crash_outcome(unresolved, came_to_stop, recovery_time_s):

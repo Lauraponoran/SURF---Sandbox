@@ -909,7 +909,7 @@ function setupCrashLayer(geojson, labelLayerId) {
 
     const recoveryLine =
       p.unresolved === true || p.unresolved === 'true'
-        ? `⚠️ <strong>Wheel didn't turn again for the rest of the trip</strong>`
+        ? `⚠️ <strong>Wheel never turned again</strong>`
         : p.came_to_stop === true || p.came_to_stop === 'true'
           ? `🧍 Came to a stop, moving again after ${p.recovery_time_s}s`
           : `↪️ Kept moving — no stop detected nearby`;
