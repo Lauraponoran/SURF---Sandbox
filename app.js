@@ -775,8 +775,76 @@ function buildCrashFeatures(features) {
   return { type: 'FeatureCollection', features: crashFeatures };
 }
 
+// Crash-type glyph icons, drawn on canvas rather than rendered as map-font
+// text. The vector basemap's font glyphs (Open Sans / Montserrat / Noto Sans)
+// only ship ordinary Latin ranges — the Geometric Shapes characters (◆ ▲ ● ■)
+// fall outside that range and silently fail to render from a `text-field`,
+// no matter what `crash_type` resolves to. Drawing them as small raster
+// icons via map.addImage() sidesteps font glyph coverage entirely.
+const CRASH_ICON_SHAPES = ['diamond', 'triangle', 'circle', 'square'];
+
+function drawCrashIcon(shape, size = 24) {
+  const canvas = document.createElement('canvas');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = size * dpr;
+  canvas.height = size * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size * 0.28;
+
+  ctx.fillStyle = '#1a1a1a';
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+  ctx.lineWidth = 1.2;
+
+  ctx.beginPath();
+  switch (shape) {
+    case 'diamond':
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r, cy);
+      ctx.closePath();
+      break;
+    case 'triangle': {
+      const h = r * 1.15;
+      ctx.moveTo(cx, cy - h);
+      ctx.lineTo(cx + h * 0.9, cy + h * 0.7);
+      ctx.lineTo(cx - h * 0.9, cy + h * 0.7);
+      ctx.closePath();
+      break;
+    }
+    case 'circle':
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      break;
+    case 'square':
+    default: {
+      const s = r * 1.4;
+      ctx.rect(cx - s / 2, cy - s / 2, s, s);
+      break;
+    }
+  }
+  ctx.fill();
+  ctx.stroke();
+
+  return { width: canvas.width, height: canvas.height, data: ctx.getImageData(0, 0, canvas.width, canvas.height).data };
+}
+
+function ensureCrashIcons() {
+  CRASH_ICON_SHAPES.forEach(shape => {
+    const id = `crash-icon-${shape}`;
+    if (!map.hasImage(id)) {
+      map.addImage(id, drawCrashIcon(shape), { pixelRatio: window.devicePixelRatio || 1 });
+    }
+  });
+}
+
 function setupCrashLayer(geojson, labelLayerId) {
   const crashData = buildCrashFeatures(geojson.features || []);
+
+  ensureCrashIcons();
 
   map.addSource('crash-events', {
     type: 'geojson',
@@ -832,12 +900,16 @@ function setupCrashLayer(geojson, labelLayerId) {
   //
   // Type is represented by shape, drawn small and dark on top of the
   // colour-coded circle (see above), so it reads as a glyph on a coloured
-  // chip rather than a second, competing colour channel:
+  // chip rather than a second, competing colour channel. Rendered as
+  // canvas-drawn icons (see drawCrashIcon/ensureCrashIcons above), not
+  // map-font text glyphs — the basemap's fonts don't cover the Geometric
+  // Shapes Unicode block, so a text-field version of this silently fails
+  // to draw no matter what crash_type resolves to:
   //
-  //   Stationary Fall → ◆
-  //   Low-Speed Fall  → ▲
-  //   High-Speed Fall    → ●
-  //   Unclassified    → ■
+  //   Stationary Fall → ◆ (diamond)
+  //   Low-Speed Fall  → ▲ (triangle)
+  //   High-Speed Fall → ● (circle)
+  //   Unclassified    → ■ (square)
   // ─────────────────────────────────────────────────────────────────────────
   map.addLayer({
     id: 'crash-events-dot',
@@ -846,39 +918,33 @@ function setupCrashLayer(geojson, labelLayerId) {
     layout: {
       visibility: 'none',
 
-      'text-field': [
+      'icon-image': [
         'match',
         ['get', 'crash_type'],
 
-        'Stationary Fall', '◆',
-        'Low-Speed Fall',  '▲',
-        'High-Speed Fall',    '●',
-        'Unclassified',    '■',
+        'Stationary Fall', 'crash-icon-diamond',
+        'Low-Speed Fall',  'crash-icon-triangle',
+        'High-Speed Fall', 'crash-icon-circle',
+        'Unclassified',    'crash-icon-square',
 
-        '■'
+        'crash-icon-square'
       ],
 
-      'text-size': [
+      'icon-size': [
         'interpolate',
         ['linear'],
         ['zoom'],
-        10, 9,
-        14, 13,
-        17, 18
+        10, 0.55,
+        14, 0.8,
+        17, 1.1
       ],
-      
-      'text-allow-overlap': true,
-      'text-ignore-placement': true
+
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true
     },
 
     paint: {
-      // Fixed dark glyph — colour is already carried by the circle beneath it.
-      'text-color': '#1a1a1a',
-
-      'text-halo-color': 'rgba(255,255,255,0.35)',
-      'text-halo-width': 0.4,
-
-      'text-opacity': 1
+      'icon-opacity': 1
     }
   }, labelLayerId);
 
