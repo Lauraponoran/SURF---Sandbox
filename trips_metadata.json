@@ -33,6 +33,23 @@
     "GNSS": ",04:22,00:12,0.926,13,13,21,,,,,0",
     "source": "local_csv"
   },
+  "602D3_Trip1": {
+    "source_file": "DC8E95FFFE7602D3_20260902_085248.csv",
+    "Charge(start | stop)": ", 98 | 92%",
+    "WheelDiam": ", 27.992141723632812 inch",
+    "Frequency": ", 50.0 Hz",
+    "Trip stop code": ", 1 (Normal finish)",
+    "BLE Device Information Service": "BLE Device Information Service",
+    "Hardware": ", 005",
+    "Firmware": ",3.0.5",
+    "SystemID": ", DC8E95FFFE7602D3",
+    "App version": ", 1.1.5+52",
+    "Sensor's connection": ", 2026-09-02 08:52:43.497, 2026-09-02 09:19:01.099",
+    "Trip start/end": ", 2026-09-02 08:52:48.556, 2026-09-02 09:18:35.301",
+    "SENSOR": ",25:47,06:41,4.41,10.3,13.9,24.3,-5.36,3.49,--,1",
+    "GNSS": ",25:42,00:38,3.989,9,10,21,,,,,50",
+    "source": "local_csv"
+  },
   "CRASH_Trip2": {
     "source_file": "DC8E95FFFE7CRASH_20260824_094043.csv",
     "Charge(start | stop)": ", 65 | 81%",
