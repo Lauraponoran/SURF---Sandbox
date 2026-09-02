@@ -1066,7 +1066,6 @@ function setupCrashLayer(geojson, labelLayerId) {
         <strong>🚨 ${p.severity} Impact</strong><br>
         💥 Peak force: ${p.peak_g}g<br>
         ⚡ Onset: ${p.suddenness_s}s to peak<br>
-        🔥 Intensity: ${p.severity}<br>
         🚲 Classification: ${crashType}<br>
         📍 Outcome: ${crashOutcome}<br>
         ${speedLine}<br>
