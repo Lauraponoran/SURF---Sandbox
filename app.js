@@ -705,9 +705,9 @@ function setupBrakingLayer(geojson, labelLayerId) {
 }
 
 // ─── Crash / fall events ────────────────────────────────────────────────────
-// Severity (colour), type (shape), and outcome (white ring) are each baked
-// directly into the marker's icon — see CRASH_SEVERITY_COLORS,
-// CRASH_TYPE_SHAPES, and drawCrashIcon() below.
+// Severity (colour), type (glyph artwork), and outcome (white ring) are
+// each baked directly into the marker's icon — see CRASH_SEVERITY_COLORS,
+// CRASH_GLYPHS, and drawCrashIcon() below.
 
 function getCrashTypeLabel(properties) {
   if (properties.crash_type) return properties.crash_type;
@@ -759,13 +759,13 @@ function buildCrashFeatures(features) {
           // "Unclassified" regardless of its actual speed/outcome data.
           crash_type,
           crash_outcome,
-          // The icon id that bakes in shape (crash_type) + colour
+          // The icon id that bakes in glyph (crash_type) + colour
           // (severity) + ring (crash_outcome) — see drawCrashIcon /
           // ensureCrashIcons above. Computed here so the source data and
           // ensureCrashIcons() always agree on which icon id a feature
           // needs.
           crash_icon_id: crashIconId(
-            crashShapeForType(crash_type),
+            crash_type,
             severity,
             crash_outcome === 'Unresolved'
           )
@@ -789,17 +789,42 @@ function buildCrashFeatures(features) {
 // top of a separately-coloured circle).
 //
 // Each icon bakes in two of the three classification dimensions at once:
-//   - shape  = crash_type   (Stationary/Low-Speed/High-Speed/Unclassified)
+//   - glyph  = crash_type   (the actual artwork below, per event type)
 //   - colour = severity     (Minor/Hard/Severe — same hex codes as the
-//                             legend and getCrashColorExpression())
+//                             legend)
 // Outcome (resolved/unresolved) is the third dimension: unresolved crashes
 // get a white ring baked into the same icon; resolved ones don't.
-const CRASH_TYPE_SHAPES = {
-  'Stationary Fall': 'diamond',
-  'Low-Speed Fall':  'triangle',
-  'High-Speed Fall': 'circle',
-  'Unclassified':    'square'
+//
+// Glyph artwork is the path data from the provided icon set (Hard_Crash /
+// Severe_Crash / Tipping_Over / Unknown_Crash — same 4 glyphs also shipped
+// as the "Simple_-_..." PNGs, just under crash-type names there instead of
+// severity names), traced out of a 256×256 viewBox and redrawn here as
+// Path2D so the fill colour can be swapped per severity at draw time,
+// rather than using the fixed colour baked into the source files.
+const CRASH_GLYPHS = {
+  // Arrow swoosh
+  'Stationary Fall': {
+    type: 'path',
+    d: 'M43.3,141.6s19.3-35.5,53.1-44.3c33.8-8.9,70.4,14,70.4,14l5.5-18.8c.1-.5.5-.8,1-1,.8-.3,1.6.1,1.9.9l18.3,53.7c0,.1,0,.2,0,.3,0,.8-.5,1.6-1.3,1.6l-53.3,5c-.4,0-.9-.1-1.2-.4-.6-.6-.6-1.5,0-2.1l15.3-16s-30.5-23.2-59.1-17.9c-28.6,5.3-50.6,24.9-50.6,24.9Z'
+  },
+  // Wifi-style signal arcs
+  'Low-Speed Fall': {
+    type: 'path',
+    d: 'M187.9,145.5c-17-38.7-62.1-60.5-103-49.8-1.5.4-2.3,2-1.7,3.4l3.1,7.8c.6,1.4,2.2,2.2,3.6,1.8,33.6-8.6,70.5,9.2,84.6,40.9.6,1.4,2.2,2.1,3.7,1.7l8.1-2.4c1.5-.5,2.3-2,1.6-3.5h0ZM161.3,153.8c-11.4-24.5-40-38.3-66.3-32.1-1.6.4-2.4,2-1.8,3.4l3.1,7.9c.5,1.4,2.1,2.2,3.5,1.9,19-4.3,39.6,5.7,48,23.2.6,1.3,2.2,2,3.7,1.6l8.1-2.4c1.5-.5,2.3-2.1,1.6-3.5Z'
+  },
+  // Zigzag impact spike — drawn stroked (source is a polyline), not filled
+  'High-Speed Fall': {
+    type: 'polyline',
+    points: [[68.5,167.8],[50.8,139.7],[79.9,139.7],[79.9,91.7],[123.1,138.1],[142.7,76.4],[167.5,127.2],[209.1,106.8],[209.1,141.8]],
+    strokeWidth: 19.8
+  },
+  // Triangle with a question mark
+  'Unclassified': {
+    type: 'path',
+    d: 'M184.2,161.2l-51-100.3c-2.8-5.6-7.5-5.6-10.3,0l-51,100.3c-2.8,5.6,0,10.1,6.4,10.1h99.6c6.3,0,9.2-4.5,6.4-10.1ZM126.3,163.1c-4.9,0-8.2-3.5-8.2-8.3,0-4.9,3.4-8.4,8.2-8.4,4.9,0,8.1,3.4,8.2,8.4,0,4.8-3.2,8.3-8.2,8.3ZM137.4,129c-3.3,3.7-4.7,7.3-4.7,11.4v1.6s-12.2,0-12.2,0v-2.3c-.4-4.7,1.2-9.5,5.3-14.4,3-3.5,5.3-6.5,5.3-9.6s-2.1-5.4-6.7-5.5c-3.1,0-6.7,1-9.1,2.7l-3.1-10c3.3-2,8.8-3.8,15.3-3.8,12.1,0,17.6,6.7,17.6,14.3s-4.4,11.6-7.9,15.4Z'
+  }
 };
+const CRASH_GLYPH_VIEWBOX = 256; // all path/point data above is in this coordinate space
 
 const CRASH_SEVERITY_COLORS = {
   'Minor':  '#ffea00',
@@ -807,117 +832,96 @@ const CRASH_SEVERITY_COLORS = {
   'Severe': '#ff1744'
 };
 
-function crashShapeForType(crashType) {
-  return CRASH_TYPE_SHAPES[crashType] || 'square';
-}
-
 function crashColorForSeverity(severity) {
   return CRASH_SEVERITY_COLORS[severity] || CRASH_SEVERITY_COLORS.Minor;
 }
 
-// Icon id encodes all three baked-in dimensions so distinct combinations
-// each get their own registered image.
-function crashIconId(shape, severity, unresolved) {
-  return `crash-icon-${shape}-${severity}-${unresolved ? 'ring' : 'plain'}`;
+// Small inline SVG version of a crash-type glyph, for the legend (which is
+// plain HTML/CSS, not the map canvas) — reuses the same path/polyline data
+// as drawCrashIcon() so the legend and the map markers always agree on
+// what each glyph looks like. Neutral colour since the legend's
+// Classification row is shape-only; severity colour is a separate row.
+function crashGlyphSvg(crashType, color = '#cfcfcf') {
+  const glyph = CRASH_GLYPHS[crashType] || CRASH_GLYPHS['Unclassified'];
+  const inner = glyph.type === 'polyline'
+    ? `<polyline points="${glyph.points.map(p => p.join(',')).join(' ')}" fill="none" stroke="${color}" stroke-width="${glyph.strokeWidth}" stroke-linejoin="round" stroke-linecap="round"/>`
+    : `<path d="${glyph.d}" fill="${color}"/>`;
+  return `<svg viewBox="0 0 ${CRASH_GLYPH_VIEWBOX} ${CRASH_GLYPH_VIEWBOX}" width="16" height="16">${inner}</svg>`;
 }
 
-function drawCrashIcon(shape, color, unresolved, size = 32) {
+// Icon id encodes all three baked-in dimensions so distinct combinations
+// each get their own registered image.
+function crashIconId(crashType, severity, unresolved) {
+  const safeType = (crashType || 'Unclassified').replace(/[^a-zA-Z0-9]+/g, '_');
+  return `crash-icon-${safeType}-${severity}-${unresolved ? 'ring' : 'plain'}`;
+}
+
+// Renders one crash-type glyph as a round badge: dark disc, a severity-
+// coloured ring, the glyph artwork in that same colour, and — for
+// unresolved crashes — an extra white ring outside it. size is the
+// icon's logical (CSS-pixel) diameter; the canvas itself is rendered at
+// size*devicePixelRatio for crispness, matching the pixelRatio passed to
+// map.addImage().
+function drawCrashIcon(crashType, color, unresolved, size = 40) {
+  const glyph = CRASH_GLYPHS[crashType] || CRASH_GLYPHS['Unclassified'];
   const canvas = document.createElement('canvas');
   const dpr = window.devicePixelRatio || 1;
   canvas.width = size * dpr;
   canvas.height = size * dpr;
   const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
 
-  const cx = size / 2;
-  const cy = size / 2;
-  // Leave room for the white ring when present so the shape doesn't grow.
-  const r = unresolved ? size * 0.30 : size * 0.36;
+  // 1 drawing unit = 1 unit in the glyphs' original 256×256 viewBox.
+  const scale = (size * dpr) / CRASH_GLYPH_VIEWBOX;
+  ctx.scale(scale, scale);
 
-  const path = () => {
-    ctx.beginPath();
-    switch (shape) {
-      case 'diamond':
-        ctx.moveTo(cx, cy - r);
-        ctx.lineTo(cx + r, cy);
-        ctx.lineTo(cx, cy + r);
-        ctx.lineTo(cx - r, cy);
-        ctx.closePath();
-        break;
-      case 'triangle': {
-        const h = r * 1.15;
-        ctx.moveTo(cx, cy - h);
-        ctx.lineTo(cx + h * 0.9, cy + h * 0.7);
-        ctx.lineTo(cx - h * 0.9, cy + h * 0.7);
-        ctx.closePath();
-        break;
-      }
-      case 'circle':
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        break;
-      case 'square':
-      default: {
-        const s = r * 1.4;
-        ctx.rect(cx - s / 2, cy - s / 2, s, s);
-        break;
-      }
-    }
-  };
+  const cx = CRASH_GLYPH_VIEWBOX / 2;
+  const cy = CRASH_GLYPH_VIEWBOX / 2;
+  const discRadius = 118;
 
-  // Outcome ring (unresolved only), drawn first so the shape sits on top.
+  // Dark disc background, matching the badge look of the source icon set.
+  ctx.beginPath();
+  ctx.arc(cx, cy, discRadius, 0, Math.PI * 2);
+  ctx.fillStyle = '#3a3838';
+  ctx.fill();
+
+  // Outcome ring (unresolved only) sits outside the severity ring.
   if (unresolved) {
-    ctx.save();
-    ctx.translate(0, 0);
-    const ringR = r + size * 0.09;
-    const ringShape = () => {
-      ctx.beginPath();
-      switch (shape) {
-        case 'diamond':
-          ctx.moveTo(cx, cy - ringR);
-          ctx.lineTo(cx + ringR, cy);
-          ctx.lineTo(cx, cy + ringR);
-          ctx.lineTo(cx - ringR, cy);
-          ctx.closePath();
-          break;
-        case 'triangle': {
-          const h = ringR * 1.15;
-          ctx.moveTo(cx, cy - h);
-          ctx.lineTo(cx + h * 0.9, cy + h * 0.7);
-          ctx.lineTo(cx - h * 0.9, cy + h * 0.7);
-          ctx.closePath();
-          break;
-        }
-        case 'circle':
-          ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-          break;
-        case 'square':
-        default: {
-          const s = ringR * 1.4;
-          ctx.rect(cx - s / 2, cy - s / 2, s, s);
-          break;
-        }
-      }
-    };
-    ringShape();
-    ctx.fillStyle = '#ffffff';
-    ctx.fill();
-    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(cx, cy, discRadius + 6, 0, Math.PI * 2);
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
   }
 
-  // A thin dark outline keeps the coloured shape legible against similarly
-  // bright basemap elements even when there's no outcome ring.
-  path();
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  // Severity-coloured ring, same colour as the glyph itself.
+  ctx.beginPath();
+  ctx.arc(cx, cy, discRadius - 5, 0, Math.PI * 2);
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = color;
   ctx.stroke();
+
+  // The glyph itself.
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  if (glyph.type === 'polyline') {
+    ctx.beginPath();
+    glyph.points.forEach(([x, y], i) => {
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.lineWidth = glyph.strokeWidth;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.stroke();
+  } else {
+    ctx.fill(new Path2D(glyph.d));
+  }
 
   return { width: canvas.width, height: canvas.height, data: ctx.getImageData(0, 0, canvas.width, canvas.height).data };
 }
 
 // Registers exactly the icon combinations present in this trip's crash
-// data (at most 4 shapes × 3 severities × 2 ring states = 24, usually far
+// data (at most 4 types × 3 severities × 2 ring states = 24, usually far
 // fewer) — cheap, and map.hasImage() skips anything already registered
 // from a previous trip.
 function ensureCrashIcons(crashFeatures) {
@@ -927,10 +931,9 @@ function ensureCrashIcons(crashFeatures) {
     const id = p.crash_icon_id;
     if (!id || seen.has(id) || map.hasImage(id)) return;
     seen.add(id);
-    const shape = crashShapeForType(p.crash_type);
     const severity = p.severity || 'Minor';
     const unresolved = p.crash_outcome === 'Unresolved';
-    map.addImage(id, drawCrashIcon(shape, crashColorForSeverity(severity), unresolved), { pixelRatio: window.devicePixelRatio || 1 });
+    map.addImage(id, drawCrashIcon(p.crash_type, crashColorForSeverity(severity), unresolved), { pixelRatio: window.devicePixelRatio || 1 });
   });
 }
 
@@ -981,18 +984,18 @@ function setupCrashLayer(geojson, labelLayerId) {
   // ─────────────────────────────────────────────────────────────────────────
   // CRASH MARKER
   //
-  // Each icon IS the coloured shape — severity (colour), type (shape), and
-  // outcome (white ring) are all baked into a single raster icon by
+  // Each icon is a round badge: severity (colour), type (glyph artwork),
+  // and outcome (white ring) are all baked into a single raster icon by
   // drawCrashIcon() and registered by ensureCrashIcons(); 'crash_icon_id'
   // (computed once in buildCrashFeatures) picks the right one per feature.
   // Rendered as canvas-drawn icons, not map-font text glyphs — the
-  // basemap's fonts don't cover the Geometric Shapes Unicode block
-  // (◆ ▲ ● ■), so a text-field version of this silently fails to draw.
+  // basemap's fonts don't cover custom glyph shapes, so a text-field
+  // version of this would silently fail to draw.
   //
-  //   Stationary Fall → ◆ (diamond)
-  //   Low-Speed Fall  → ▲ (triangle)
-  //   High-Speed Fall → ● (circle)
-  //   Unclassified    → ■ (square)
+  //   Stationary Fall → arrow swoosh
+  //   Low-Speed Fall  → wifi-style signal arcs
+  //   High-Speed Fall → zigzag impact spike
+  //   Unclassified    → triangle with a question mark
   //   colour: Minor #ffea00 / Hard #ff9100 / Severe #ff1744
   //   white ring: unresolved crashes only
   // ─────────────────────────────────────────────────────────────────────────
@@ -1005,13 +1008,15 @@ function setupCrashLayer(geojson, labelLayerId) {
 
       'icon-image': ['get', 'crash_icon_id'],
 
+      // Icons are rendered at a 40px logical diameter (see drawCrashIcon),
+      // so icon-size is a multiplier of that base.
       'icon-size': [
         'interpolate',
         ['linear'],
         ['zoom'],
-        10, 0.6,
-        14, 0.85,
-        17, 1.15
+        10, 0.48,
+        14, 0.68,
+        17, 0.95
       ],
 
       'icon-allow-overlap': true,
@@ -1658,10 +1663,10 @@ const CRASH_LEGEND_CATEGORIES = [
     label: 'Classification',
     hint: 'Symbol shape = type of event',
     rows: [
-      { swatch: `<div class="cl-swatch cl-swatch--glyph">◆</div>`, label: 'Stationary Fall' },
-      { swatch: `<div class="cl-swatch cl-swatch--glyph">▲</div>`, label: 'Low-Speed Fall' },
-      { swatch: `<div class="cl-swatch cl-swatch--glyph">●</div>`, label: 'High-Speed Fall' },
-      { swatch: `<div class="cl-swatch cl-swatch--glyph">■</div>`, label: 'Unclassified' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">${crashGlyphSvg('Stationary Fall')}</div>`, label: 'Stationary Fall' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">${crashGlyphSvg('Low-Speed Fall')}</div>`, label: 'Low-Speed Fall' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">${crashGlyphSvg('High-Speed Fall')}</div>`, label: 'High-Speed Fall' },
+      { swatch: `<div class="cl-swatch cl-swatch--glyph">${crashGlyphSvg('Unclassified')}</div>`, label: 'Unclassified' },
     ]
   },
   {
